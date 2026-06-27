@@ -56,10 +56,10 @@ async function boot(): Promise<void> {
   }
 
   const rebuildKnights = (): void => {
-    // scale the knight with the (now much denser) grid so it stays a bold ~22%
-    // of the lane rather than capping out tiny on wide desktop fields
-    const kc = Math.max(22, Math.min(46, Math.round(screen.cols * 0.22)));
-    const kr = Math.max(14, Math.round(kc * 0.62));
+    // scale the knight with the (now much denser) grid so it stays a bold,
+    // readable presence rather than capping out tiny on wide desktop fields
+    const kc = Math.max(26, Math.min(58, Math.round(screen.cols * 0.28)));
+    const kr = Math.max(18, Math.round(kc * 0.66));
     buildKnights(kc, kr);
   };
 
