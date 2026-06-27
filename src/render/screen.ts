@@ -23,11 +23,16 @@ export class Screen {
     this.ctx = ctx;
   }
 
-  /** Resize to the element's box and recompute the character grid. */
-  resize(): void {
-    const rect = this.canvas.getBoundingClientRect();
-    this.cssW = Math.max(1, Math.round(rect.width));
-    this.cssH = Math.max(1, Math.round(rect.height));
+  /** Resize to an explicit CSS size (offscreen scene) or the element box. */
+  resize(cssW?: number, cssH?: number): void {
+    if (cssW && cssH) {
+      this.cssW = Math.max(1, Math.round(cssW));
+      this.cssH = Math.max(1, Math.round(cssH));
+    } else {
+      const rect = this.canvas.getBoundingClientRect();
+      this.cssW = Math.max(1, Math.round(rect.width));
+      this.cssH = Math.max(1, Math.round(rect.height));
+    }
     this.dpr = Math.min(2, Math.max(1, window.devicePixelRatio || 1));
 
     this.canvas.width = Math.round(this.cssW * this.dpr);
