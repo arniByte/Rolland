@@ -207,6 +207,16 @@ hosts are blocked, only use localhost):
    fallback, reconnect, spectators); real‑device mobile perf tuning.
 
 ## Changelog
+- **Iteration 6.1 (knight redraw):** the procedural knight/horse read as a
+  shapeless blob (solid silhouette → uniform bright glyphs). Fixed by painting a
+  **lit greyscale** illustration (bright = lit surface) and baking with a new
+  `raster.ts` `source:"luma"` mode (bright source → dense bright glyph), so the
+  form has real volume. `knightgen.ts` redrawn: clear galloping destrier (long lit
+  back, bold arched neck + head with ears/muzzle, spread bright legs, short
+  scalloped caparison) + a distinct armoured rider (tall steel cuirass, great helm
+  with vision slit, big plume, heater shield). Knight size bumped (`main.ts`
+  ~0.28·cols, cap 58). Reads clearly as a charging knight on desktop + mobile;
+  logic untouched (43 tests green).
 - **Iteration 6 (DARK PHOSPHOR visual overhaul):** palette replaced blue/cream →
   void/acid/cyan/hit as a single token source (`render/palette.ts` with
   `familyShade`/`worldShade`/`lerpHex`, mirrored in `style.css :root`). Knights/

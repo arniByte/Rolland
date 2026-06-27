@@ -15,6 +15,9 @@ export interface RasterOpts {
   /** 'ramp' = punctuation halftone (great for big art); 'block' = ░▒▓█ shaded
    *  silhouette (clean for small sprites) */
   mode?: "ramp" | "block";
+  /** 'ink' = coverage from darkness (draw dark shapes); 'luma' = coverage from
+   *  brightness (draw LIT shapes — bright surface → dense bright glyph). */
+  source?: "ink" | "luma";
 }
 
 const EDGE_BY_ANGLE = (gx: number, gy: number): string => {
@@ -42,7 +45,9 @@ export function canvasToAscii(ctx: CanvasRenderingContext2D, opts: RasterOpts): 
   const cw = pxW / cols;
   const ch = pxH / rows;
 
-  // 1) per-cell ink coverage (0 empty .. 1 solid dark)
+  // 1) per-cell coverage (0 empty .. 1 solid). 'ink' weights by darkness,
+  //    'luma' weights by brightness (so a lit silhouette shades intuitively).
+  const luma = opts.source === "luma";
   const ink: number[][] = [];
   for (let r = 0; r < rows; r++) {
     ink[r] = [];
@@ -62,7 +67,7 @@ export function canvasToAscii(ctx: CanvasRenderingContext2D, opts: RasterOpts): 
               (img[i + 1] as number) * 0.587 +
               (img[i + 2] as number) * 0.114) /
             255;
-          sum += a * (1 - lum);
+          sum += a * (luma ? lum : 1 - lum);
           n++;
         }
       }
