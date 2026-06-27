@@ -10,6 +10,8 @@ import { UI } from "./ui/ui";
 import { Loop } from "./core/loop";
 import { attachKeyboard } from "./core/input";
 import { buildKnights } from "./render/knightgen";
+import { Online } from "./net/session";
+import type { Transport } from "./net/transport";
 
 async function boot(): Promise<void> {
   const visible = document.getElementById("arena") as HTMLCanvasElement | null;
@@ -30,9 +32,20 @@ async function boot(): Promise<void> {
 
   let ui: UI | undefined;
   const engine = new Engine({ audio, shake, onUiChange: () => ui?.render() });
-  ui = new UI(uiRoot, engine, audio);
+
+  // Trystero is dynamically imported ONLY here, so Vite code-splits it into a
+  // lazy chunk fetched the first time a player opens an online room — the core
+  // bundle (title/local2p/AI/offline) stays dependency-free.
+  const makeTransport = async (code: string): Promise<Transport> => {
+    const { createTrysteroTransport } = await import("./net/trysteroTransport");
+    return createTrysteroTransport(code);
+  };
+  const online = new Online({ engine, onUiChange: () => ui?.render(), makeTransport });
+
+  ui = new UI(uiRoot, online, audio);
   if (import.meta.env.DEV) {
-    (window as unknown as { __engine: Engine }).__engine = engine;
+    (window as unknown as { __engine: Engine; __online: Online }).__engine = engine;
+    (window as unknown as { __engine: Engine; __online: Online }).__online = online;
   }
 
   const rebuildKnights = (): void => {
@@ -71,22 +84,34 @@ async function boot(): Promise<void> {
   const detachKeyboard = attachKeyboard({
     onAnswer: (i) => {
       audio.resume();
-      engine.answer(i.player, i.choice);
+      // local 2P uses both key banks (one per player); every other mode answers
+      // as whoever this device controls.
+      if (engine.settings.mode === "local2p") engine.answer(i.player, i.choice);
+      else online.controller.answerLocal(i.choice);
     },
     onConfirm: () => {
       audio.resume();
-      engine.confirm();
+      online.controller.confirm();
     },
-    onBack: () => engine.back(),
+    // in a room, Escape always leaves cleanly (sends bye, closes the transport,
+    // resets to the title) instead of letting the Engine wander off and orphan
+    // the peer; offline it's the usual back.
+    onBack: () => {
+      if (online.active) online.leave();
+      else online.controller.back();
+    },
   });
 
   const loop = new Loop({
     update: (dt, now) => {
-      engine.update(dt, now);
+      online.update(dt, now);
+      // the guest's match is driven by host snapshots, not its own Engine
+      if (!online.guestInMatch) engine.update(dt, now);
       arena.update(dt);
     },
     render: () => {
-      arena.draw(engine);
+      if (online.hostInMatch) online.hostBroadcast();
+      arena.draw(online.view);
       if (postfx.ok) postfx.render(sceneCanvas, performance.now(), shake.value);
       else if (vis2d) vis2d.drawImage(sceneCanvas, 0, 0, sceneCanvas.width, sceneCanvas.height);
     },

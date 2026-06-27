@@ -4,7 +4,7 @@ import { ditherFill, divider } from "./frame";
 import { KNIGHT } from "./sprites";
 import { Particles } from "./particles";
 import { Shake } from "./shake";
-import { Engine } from "../game/engine";
+import type { GameView } from "../game/view";
 import { getArt, type AsciiArt } from "./art";
 
 interface Layout {
@@ -55,7 +55,7 @@ export class Arena {
     });
   }
 
-  draw(e: Engine): void {
+  draw(e: GameView): void {
     const s = this.s;
     const layout = this.layout(e);
     this.drainEvents(e, layout);
@@ -86,7 +86,7 @@ export class Arena {
   }
 
   // ---- layout -----------------------------------------------------------
-  private layout(e: Engine): Layout {
+  private layout(e: GameView): Layout {
     const s = this.s;
     const kw = KNIGHT.w;
     // lift the lane on tall (portrait) screens so the joust sits in the open
@@ -180,19 +180,19 @@ export class Arena {
   }
 
   // ---- knights ----------------------------------------------------------
-  private frameKey(e: Engine, player: 0 | 1): "g1" | "g2" | "rear" {
+  private frameKey(e: GameView, player: 0 | 1): "g1" | "g2" | "rear" {
     if (e.screen === "matchOver" && e.match.matchWinner === player) return "rear";
     const riding = e.screen === "playing" || e.screen === "clash" || e.screen === "roundIntro";
     if (!riding) return "g1";
     return Math.floor(this.time * 0.012) % 2 === 0 ? "g1" : "g2";
   }
 
-  private drawKnights(e: Engine, layout: Layout): void {
+  private drawKnights(e: GameView, layout: Layout): void {
     this.drawKnight(e, 0, layout.p0x, layout);
     this.drawKnight(e, 1, layout.p1x, layout);
   }
 
-  private drawKnight(e: Engine, player: 0 | 1, x: number, layout: Layout): void {
+  private drawKnight(e: GameView, player: 0 | 1, x: number, layout: Layout): void {
     const s = this.s;
     const v = e.knights[player];
     const mirror = player === 1;
@@ -214,7 +214,7 @@ export class Arena {
     this.drawLance(player, x, top, v.lance, e);
   }
 
-  private drawLance(player: 0 | 1, x: number, top: number, lance: number, e: Engine): void {
+  private drawLance(player: 0 | 1, x: number, top: number, lance: number, e: GameView): void {
     const s = this.s;
     const accent = ACCENT[player];
     const handRow = top + KNIGHT.handRow;
@@ -232,7 +232,7 @@ export class Arena {
   // Name + hearts live in the HTML pad headers (always visible, both
   // orientations). Here we only draw the round pips, placed in the open band
   // above the knights so the answer pads never cover them.
-  private drawHud(e: Engine, layout: Layout): void {
+  private drawHud(e: GameView, layout: Layout): void {
     const s = this.s;
     const pips = e.settings.rounds;
     const row = Math.max(0, layout.knightTop - 2);
@@ -253,7 +253,7 @@ export class Arena {
   }
 
   // ---- centre banners (clash / result / quick-draw cue) ----------------
-  private drawCenter(e: Engine, layout: Layout): void {
+  private drawCenter(e: GameView, layout: Layout): void {
     const s = this.s;
 
     // Quick Draw: HOLD … then a sudden STRIKE cue both players can read at a glance
@@ -286,7 +286,7 @@ export class Arena {
     }
   }
 
-  private drawTitleScene(layout: Layout, e: Engine): void {
+  private drawTitleScene(layout: Layout, e: GameView): void {
     const s = this.s;
     const emblem = getArt("emblem");
     if (emblem) {
@@ -299,7 +299,7 @@ export class Arena {
   }
 
   // ---- events -> particles ---------------------------------------------
-  private drainEvents(e: Engine, layout: Layout): void {
+  private drainEvents(e: GameView, layout: Layout): void {
     if (e.events.length === 0) return;
     for (const ev of e.events) {
       if (ev.type === "hoof") {
