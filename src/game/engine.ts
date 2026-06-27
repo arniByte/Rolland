@@ -15,9 +15,10 @@ import { damp, clamp } from "../core/mathx";
 import type { Audio } from "../core/audio";
 import type { Shake } from "../render/shake";
 
-export type Mode = "local2p" | "ai";
+export type Mode = "local2p" | "ai" | "online";
 export type ScreenName =
   | "title"
+  | "online"
   | "modes"
   | "setup"
   | "roundIntro"
@@ -45,6 +46,21 @@ export interface KnightView {
 export interface Attempt {
   state: "idle" | "wrong" | "correct";
   choice?: number;
+}
+
+/** one player's judged input for an exchange (computed locally, shared online) */
+export interface Sub {
+  correct: boolean;
+  reactionMs: number;
+  choice: number;
+}
+export interface RemoteSub extends Sub {
+  exchangeId: number;
+}
+/** online hook: which player is local on this device + how to send our inputs */
+export interface NetHook {
+  localPlayer: PlayerId;
+  send: (sub: RemoteSub) => void;
 }
 
 const FEEDBACK_MS = 650;
@@ -91,10 +107,15 @@ export class Engine {
   /** drained by the renderer (which knows cell coordinates) to spawn particles */
   events: EngineEvent[] = [];
 
+  /** online play: set by NetSession (null = local/AI). */
+  net: NetHook | null = null;
+
   private rng = new Rng(randomSeed());
   private now = 0;
   private problemShownAt = 0;
-  private firstCorrect: { player: PlayerId; reactionMs: number } | null = null;
+  private subs: [Sub | null, Sub | null] = [null, null];
+  private exchangeId = 0;
+  private remoteBuffer = new Map<number, RemoteSub>();
   private exchangeResolved = false;
   private cooldown = 0;
   private aiPlan: AiPlan | null = null;
@@ -105,8 +126,9 @@ export class Engine {
   constructor(private deps: EngineDeps) {}
 
   // ---- public API -------------------------------------------------------
-  startMatch(): void {
-    this.rng = new Rng(randomSeed());
+  startMatch(seed?: number): void {
+    // online peers pass a shared seed so the deterministic problem stream matches
+    this.rng = new Rng(seed ?? randomSeed());
     this.match = createMatch({
       rounds: this.settings.rounds,
       stridesToClash: 6,
@@ -114,6 +136,9 @@ export class Engine {
       difficulty: this.settings.difficulty,
     });
     this.knights = [freshView(), freshView()];
+    this.subs = [null, null];
+    this.remoteBuffer.clear();
+    this.exchangeId = 0;
     this.introT = 0;
     this.clashT = 0;
     this.resultT = 0;
@@ -167,11 +192,11 @@ export class Engine {
     this.setScreen("setup");
   }
 
+  /** A local input from this device's pad. Online: only your own player. */
   answer(player: PlayerId, choice: number): void {
     if (this.screen !== "playing" || this.exchangeResolved || !this.problem) return;
-    const a = this.attempts[player];
-    if (a.state !== "idle") return;
-    a.choice = choice;
+    if (this.net && player !== this.net.localPlayer) return;
+    if (this.attempts[player].state !== "idle") return;
 
     const age = this.now - this.problemShownAt;
     let correct: boolean;
@@ -184,30 +209,47 @@ export class Engine {
       correct = choice === this.problem.correct;
       reactionMs = age;
     }
+    const sub: Sub = { correct, reactionMs, choice };
+    this.submit(player, sub);
+    if (this.net) this.net.send({ ...sub, exchangeId: this.exchangeId });
+  }
 
-    if (correct) {
-      a.state = "correct";
-      if (this.firstCorrect === null) {
-        this.firstCorrect = { player, reactionMs };
-        this.deps.audio.correct(player);
-        this.knights[player].lance = 1;
-        this.resolveExchange(player);
-      }
+  /** The opponent's input over the network (online lockstep). */
+  submitRemote(rs: RemoteSub): void {
+    if (!this.net) return;
+    const player: PlayerId = this.net.localPlayer === 0 ? 1 : 0;
+    if (rs.exchangeId === this.exchangeId && this.screen === "playing" && !this.exchangeResolved) {
+      this.submit(player, rs);
     } else {
-      a.state = "wrong";
+      this.remoteBuffer.set(rs.exchangeId, rs); // peer is ahead/behind — apply when we arrive
+    }
+  }
+
+  private submit(player: PlayerId, sub: Sub): void {
+    if (this.attempts[player].state !== "idle") return;
+    this.attempts[player] = { state: sub.correct ? "correct" : "wrong", choice: sub.choice };
+    this.subs[player] = sub;
+    if (sub.correct) {
+      this.deps.audio.correct(player);
+      this.knights[player].lance = 1;
+    } else {
       this.deps.audio.wrong();
       this.deps.shake.add(0.14);
       this.knights[player].flash = 1;
       this.events.push({ type: "wrong", player });
-      if (
-        this.firstCorrect === null &&
-        this.attempts[0].state !== "idle" &&
-        this.attempts[1].state !== "idle"
-      ) {
-        this.resolveExchange(null);
-      }
     }
     this.deps.onUiChange();
+    this.tryResolve();
+  }
+
+  private tryResolve(): void {
+    if (this.exchangeResolved) return;
+    const [s0, s1] = this.subs;
+    const anyCorrect = (s0?.correct ?? false) || (s1?.correct ?? false);
+    const both = !!s0 && !!s1;
+    // online is deterministic lockstep → wait for both; local/AI resolves on the
+    // first correct (real-time race), or once both have missed.
+    if (this.net ? both : anyCorrect || both) this.resolveExchange();
   }
 
   // ---- update -----------------------------------------------------------
@@ -247,7 +289,7 @@ export class Engine {
     }
 
     // AI commits to its answer after a sampled delay
-    if (this.settings.mode === "ai" && this.aiPlan && !this.aiActed && this.problem && this.firstCorrect === null) {
+    if (this.settings.mode === "ai" && this.aiPlan && !this.aiActed && this.problem && !this.exchangeResolved) {
       if (this.problem.kind === "quickdraw") {
         const reveal = this.problem.revealMs ?? 0;
         // a "mistake" here is an early flinch (false start) before the rune flares
@@ -334,7 +376,8 @@ export class Engine {
     this.problemShownAt = this.now;
     this.exchangeAge = 0;
     this.attempts = [{ state: "idle" }, { state: "idle" }];
-    this.firstCorrect = null;
+    this.subs = [null, null];
+    this.exchangeId++;
     this.exchangeResolved = false;
     this.cooldown = 0;
     this.aiActed = false;
@@ -344,15 +387,29 @@ export class Engine {
     const base = this.settings.difficulty === "champion" ? 150 : this.settings.difficulty === "knight" ? 230 : 340;
     this.aiReactMs = Math.round(base + this.rng.next() * base);
     this.deps.onUiChange();
+
+    // online: a peer input that arrived early for this exchange now applies
+    const buffered = this.remoteBuffer.get(this.exchangeId);
+    if (buffered) {
+      this.remoteBuffer.delete(this.exchangeId);
+      this.submitRemote(buffered);
+    }
   }
 
-  private resolveExchange(winner: PlayerId | null): void {
+  private resolveExchange(): void {
     if (this.exchangeResolved) return;
     this.exchangeResolved = true;
+    const [s0, s1] = this.subs;
+    const c0 = s0?.correct ?? false;
+    const c1 = s1?.correct ?? false;
+    let winner: PlayerId | null = null;
+    if (c0 && c1) winner = (s0 as Sub).reactionMs <= (s1 as Sub).reactionMs ? 0 : 1;
+    else if (c0) winner = 0;
+    else if (c1) winner = 1;
     const ex: ExchangeResult = {
       winner,
-      reactionMs: this.firstCorrect ? this.firstCorrect.reactionMs : 0,
-      wrong: [this.attempts[0].state === "wrong", this.attempts[1].state === "wrong"],
+      reactionMs: winner !== null ? (this.subs[winner] as Sub).reactionMs : 0,
+      wrong: [s0?.correct === false, s1?.correct === false],
     };
     applyExchange(this.match, ex);
     if (winner !== null) {

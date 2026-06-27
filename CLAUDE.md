@@ -112,6 +112,13 @@ hosts are blocked, only use localhost):
 - Commit trailers: `Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>`.
 - Keep it lightweight and mobile-first. Test on a 390×844 portrait viewport.
 - Match the surrounding code's style; comments explain *why*, sparingly.
+- **Session hygiene (avoid the chat "Request too large, max 32MB" error):** that
+  error is NOT a code bug — it's the chat request growing past 32MB because
+  images pile up in a long conversation's history. So: never Read full-res
+  images (downscale screenshots to ≤~420px / JPEG q≈50 before viewing, or verify
+  programmatically instead), and when a session gets long/erroring, **start a
+  fresh session** — this CLAUDE.md + the repo carry all context, so nothing is
+  lost.
 
 ## Roadmap / TODO (owner's priorities)
 1. **[DONE] Foundation audit & bug fixes** — 60-agent audit found 42 confirmed
@@ -142,15 +149,25 @@ hosts are blocked, only use localhost):
    trauma), scanlines, vignette, grain. Day/parchment palette kept. Graceful
    fallback to a 2D blit (+ arena's own CRT) when WebGL is unavailable
    (`arena.skipCRT`). Owner chose: keep day look + deluxe (not night-glow).
-7. **[NEXT] Online 2-player** — rooms by code. Owner chose **WebRTC P2P
-   (Trystero)** — no server, works on the current Vercel static host. Plan:
-   host-authoritative; fairness by *reaction time* (compare time-since-each-
-   player-saw-the-prompt, not packet arrival). Build a `Transport` interface with
-   a `LoopbackTransport` (in-process, for tests) + `TrysteroTransport` (prod);
-   refactor Arena/UI to render from a `GameView` the host Engine and a guest
-   `RemoteView` both implement; works for arithmetic AND quickdraw. NOTE: the
-   sandbox egress likely blocks public WebRTC signaling, so test the netplay
-   logic via loopback here; the owner verifies real P2P with a friend.
+7. **[IN PROGRESS] Online 2-player** — rooms by code over **WebRTC P2P
+   (Trystero)**, no server (works on the current Vercel static host). Model is
+   **deterministic lockstep** (simpler than host-snapshots): both peers run the
+   SAME `Engine` on a SHARED RNG seed and exchange only one `{correct,reactionMs,
+   choice}` submission per exchange; each side resolves identically. Fair under
+   latency because we compare *reaction time since each player saw the prompt*,
+   not packet arrival. Host = player 0 (room creator), guest = player 1.
+   - DONE: engine refactored to a `subs[]` submission model + `submitRemote()`
+     with a `remoteBuffer` keyed by `exchangeId` (prevents lockstep deadlock when
+     peers drift in timing); `engine.net` hook; `startMatch(seed)`; `Mode`
+     +"online", `ScreenName` +"online". `net/transport.ts` = `Transport`
+     interface + `makeLoopback()` (in-process pair for tests).
+   - REMAINING: `net/session.ts` (ties Transport↔Engine: send seed/inputs, apply
+     remote), `net/trystero.ts` (thin prod adapter, dynamic-import `trystero`),
+     a room UI screen (CREATE shows code / JOIN enters code / lobby → START),
+     main wiring, and a Vitest that links two stub-dep engines via loopback and
+     asserts their match states stay identical (proves lockstep). Sandbox egress
+     blocks public WebRTC signaling, so real P2P is owner-verified with a friend;
+     loopback proves the netplay logic here.
 8. **[future]** Owner-generated art via `raw-art/` + `gen:art` (now REP-quality
    capable); more trials (memory runes, rhythm, anagram); optional night-glow toggle.
 
