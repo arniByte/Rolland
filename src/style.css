@@ -452,3 +452,56 @@ body {
   inset: 0;
   background: transparent;
 }
+
+/* ---- online lobby ---- */
+.lobby-state {
+  color: var(--blue1);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  margin: 0.2rem 0 0.5rem;
+  font-size: 0.9rem;
+}
+.code {
+  font-family: var(--black-letter);
+  font-size: clamp(2.6rem, 13vw, 4.4rem);
+  letter-spacing: 0.3em;
+  color: var(--red-deep);
+  text-shadow: 0 2px 0 var(--blue3);
+  margin: 0.3rem 0 0.1rem;
+  padding-left: 0.3em; /* counter the trailing letter-spacing so it reads centred */
+}
+.code-input {
+  text-transform: uppercase;
+  letter-spacing: 0.3em;
+  width: 7rem;
+}
+.lobby-or {
+  color: var(--blue2);
+  letter-spacing: 0.2em;
+  font-size: 0.78rem;
+  margin: 0.5rem 0;
+}
+.lobby-decree {
+  color: var(--ink);
+  font-size: 0.84rem;
+  line-height: 1.5;
+  margin: 0.4rem auto 0.2rem;
+  max-width: 34ch;
+}
+
+/* online: a single pad, centred + upright on each player's own device */
+#ui[data-solo] .pad.p0,
+#ui[data-solo] .pad.p1 {
+  left: 50%;
+  right: auto;
+  top: auto;
+  bottom: 0;
+  transform: translateX(-50%);
+  width: min(94%, 460px);
+}
+@media (orientation: landscape) {
+  #ui[data-solo] .pad.p0,
+  #ui[data-solo] .pad.p1 {
+    width: min(70%, 520px);
+  }
+}

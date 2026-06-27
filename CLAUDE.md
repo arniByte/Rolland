@@ -51,6 +51,9 @@ screen should read as **hand-made ASCII**.
   pad rotated 180°; landscape = side by side).
 - **Vs Squire AI** — solo vs bot (squire/knight/champion). Engine is
   *opponent-agnostic* so adding opponents/modes is cheap.
+- **Online** — WebRTC P2P duel by 4-letter room code (host creates, foe joins).
+  Host-authoritative; fair by *reaction time*. Each device shows only its own
+  upright pad. Works for arithmetic AND quick-draw. (See Roadmap #7.)
 - **Challenge types** (the duel's "question"): currently **arithmetic**. Planned:
   swipe in the menu to a **mode-select world** to pick *other* engaging
   challenge types (reflex/timing, memory runes, etc.) — see Roadmap.
@@ -62,11 +65,15 @@ src/
           audio.ts (WebAudio SFX + medieval loop) · easing.ts · mathx.ts
   game/   rng.ts · problems.ts · match.ts · ai.ts   (PURE, unit-tested)
           engine.ts  (screen FSM + round orchestration + view state)
+          view.ts    (GameView/GameController seam — host Engine + guest RemoteView both implement)
+  net/    transport.ts (interface) · loopback.ts (in-proc, tests) · trysteroTransport.ts (WebRTC P2P, lazy CDN)
+          protocol.ts (wire msgs + Snapshot) · snapshot.ts · remoteView.ts (guest GameController)
+          session.ts (Online: host/guest orchestrator + lobby state) · room.ts · constants.ts
   render/ screen.ts (ASCII canvas) · palette.ts · frame.ts (boxes/meters/dither)
           sprites.ts (knight meta+fallback) · knightgen.ts (vector→ASCII)
-          raster.ts (image→dithered ASCII) · arena.ts (the scene) · art.ts (baked registry)
+          raster.ts (image→dithered ASCII) · arena.ts (the scene, renders a GameView) · art.ts (baked registry)
           particles.ts · shake.ts (trauma)
-  ui/     ui.ts (responsive HTML overlay: menus + answer pads)
+  ui/     ui.ts (responsive HTML overlay: menus + answer pads + online lobby; renders a GameController)
   assets/art/*.json  (baked dithered-ASCII art; picked up by art.ts via glob)
 scripts/  gen-ascii.mjs   (offline image→dithered-ASCII baker; SVG emblem + raw-art/)
 docs/     screenshots
@@ -76,11 +83,18 @@ docs/     screenshots
 - **Pure logic never imports DOM**; time is passed in (fixed timestep).
 
 ## Key decisions & constraints
-- **Stack:** Vite + TypeScript (strict) + Vitest. **Zero runtime deps.** Bundle ~39KB.
+- **Stack:** Vite + TypeScript (strict) + Vitest. **Zero *bundled* runtime deps.**
+  Core JS bundle ~62KB (was ~39KB pre-netcode; +~15KB is the pure-TS online layer).
+  Online play uses **Trystero (WebRTC P2P)** but it is *never bundled*: it loads
+  via a function-level dynamic `import()` of a pinned ESM CDN URL inside
+  `net/trysteroTransport.ts`, which Vite code-splits into a lazy chunk fetched
+  only when a player opens a room. So local/AI play and the offline single-file
+  build stay dependency-free and unchanged. (To vendor instead: `npm i trystero`
+  and swap the URL for the bare specifier — the dynamic import handles either.)
 - **Graphics live on `<canvas>` as ASCII** — *not* DOM. Therefore **Tailwind/Next.js
   do not help the visuals** (they style HTML/SSR). Don't introduce them for looks.
-  Node is used only for tooling; a tiny WS server (or PartyKit/Ably) is the plan
-  for future online play — not Next.js.
+  Node is used only for tooling. Online is P2P (Trystero), so **no server** — it
+  works on the current static Vercel host.
 - **Higgsfield image gen works but its CloudFront URLs are 403 from the build
   sandbox** (CDN ACL) — cannot fetch bytes here. So art is **procedural +
   the baker**. The owner will drop their own refs into `raw-art/` and run
@@ -103,7 +117,10 @@ npm run gen:art        # bake raw-art/*.{png,jpg,webp} + SVG emblem → src/asse
 **Visual QA via headless Chromium** (Playwright is installed `--no-save`; prod
 hosts are blocked, only use localhost):
 - executablePath: `/opt/pw-browsers/chromium-1194/chrome-linux/chrome`
-- `window.__engine` is exposed for scripted playthroughs (answer/confirm/screen).
+- `window.__engine` + `window.__online` are exposed (DEV) for scripted playthroughs.
+  Online can be exercised headlessly by injecting a `LoopbackTransport` via
+  `__online.deps.makeTransport` and running an in-page host (see how iteration 5
+  was verified) — real WebRTC signalling is egress-blocked here.
 - Screenshots can be huge → downscale with `sharp` before viewing.
 
 ## Conventions
@@ -142,19 +159,51 @@ hosts are blocked, only use localhost):
    trauma), scanlines, vignette, grain. Day/parchment palette kept. Graceful
    fallback to a 2D blit (+ arena's own CRT) when WebGL is unavailable
    (`arena.skipCRT`). Owner chose: keep day look + deluxe (not night-glow).
-7. **[NEXT] Online 2-player** — rooms by code. Owner chose **WebRTC P2P
-   (Trystero)** — no server, works on the current Vercel static host. Plan:
-   host-authoritative; fairness by *reaction time* (compare time-since-each-
-   player-saw-the-prompt, not packet arrival). Build a `Transport` interface with
-   a `LoopbackTransport` (in-process, for tests) + `TrysteroTransport` (prod);
-   refactor Arena/UI to render from a `GameView` the host Engine and a guest
-   `RemoteView` both implement; works for arithmetic AND quickdraw. NOTE: the
-   sandbox egress likely blocks public WebRTC signaling, so test the netplay
-   logic via loopback here; the owner verifies real P2P with a friend.
+7. **[DONE] Online 2-player** — WebRTC P2P (Trystero), rooms by 4-letter code, no
+   server. **Host-authoritative**: the host runs the real `Engine`; the guest runs
+   a `RemoteView` that mirrors host **snapshots** (one per frame) and sends its
+   inputs back. Arena/UI render from a `GameView`/`GameController` seam (`game/view.ts`)
+   that both implement. **Fairness by reaction time**: each device stamps when *it*
+   showed the prompt; the host buffers correct answers for a `SETTLE_MS_ONLINE`
+   (120ms) window and the smallest reaction wins — so a genuinely-faster guest whose
+   packet lands a touch late still wins (never packet-arrival order). Works for
+   arithmetic AND quick-draw. `Transport` seam with `LoopbackTransport` (the whole
+   protocol + fairness is proven headlessly in vitest, incl. a delayed-transport
+   latency case) + `TrysteroTransport` (lazy CDN, zero bundled deps). Lobby: create
+   /join, host decrees settings, single upright pad per device, peer-left + connect
+   -timeout handling. **NOTE: real WebRTC signalling is egress-blocked in the sandbox
+   — the owner must verify true P2P with a friend** (the netcode logic itself is
+   loopback-tested + a guest render was confirmed in-browser over loopback).
+   Follow-ups (not blocking): mid-match reconnect, a TURN fallback for strict NATs,
+   online spectators, optimistic guest motion smoothing.
 8. **[future]** Owner-generated art via `raw-art/` + `gen:art` (now REP-quality
    capable); more trials (memory runes, rhythm, anagram); optional night-glow toggle.
 
 ## Changelog
+- **Iteration 5 (online 2-player, WebRTC P2P):** new `game/view.ts` seam
+  (`GameView`/`GameController`) — Arena + UI now render from it, not the concrete
+  Engine; `Engine implements GameController` (declaration-only). New `src/net/`:
+  `Transport` interface + `LoopbackTransport` (in-proc, tests) + `TrysteroTransport`
+  (lazy CDN dynamic-import, code-split out of core → zero bundled deps preserved);
+  `protocol.ts` (typed wire messages + flattened `Snapshot`); `snapshot.ts`
+  (`toSnapshot`/`snapToMatch`, deep-copied, problem-omit-when-unchanged, event
+  deltas); `remoteView.ts` (guest `GameController` mirroring snapshots + optimistic
+  local-attempt feedback + latency-proof reaction stamping); `session.ts` (`Online`
+  orchestrator: lobby state machine, host/guest handshake, settings push, ping
+  /peer-left/connect-timeout watchdogs); `room.ts` (codes). Engine gained a
+  **settle buffer** (`submit`/`answerRemote`/`resolveFromPending`): online resolves
+  by smallest reaction time inside a 120ms window (settle=0 for local/AI → behaviour
+  byte-identical, regression-tested). `main.ts` wires an `Online` that swaps
+  `view`/`controller` for the guest and broadcasts host snapshots; keyboard is
+  mode-aware (Esc leaves a room cleanly). UI gained a `lobby` screen, single-pad
+  `data-solo` layout, peer-left overlay, host/guest matchOver buttons. 43 tests
+  green (incl. full host→guest parity + reaction-fairness over a delayed transport);
+  a 60-agent design + 16-agent adversarial review hardened the keyboard-teardown,
+  connect-timeout, and malformed-frame edges. Guest render confirmed in-browser
+  over loopback. Bundle 46→62KB (pure-TS netcode; Trystero stays an external CDN import).
+- **Iteration 4 (WebGL deluxe post-FX):** `render/postfx.ts` — offscreen Canvas2D
+  scene → WebGL pass (ink-bloom, Bayer dither halftone, impact-eased chromatic
+  aberration, scanlines/vignette/grain), graceful 2D-blit fallback.
 - **Iteration 3 (modes world + reflex duel):** title → `modes` swipe carousel of
   trials (ARITHMETIC, QUICK DRAW); `settings.challenge` plumbed through engine;
   QUICK DRAW reflex mechanic (timing-judged, AI gets a reaction model + early
@@ -176,8 +225,10 @@ hosts are blocked, only use localhost):
   HMR-safe boot, gen-ascii error context.
 
 ## Open design questions to revisit
-- Alt-mode to ship first in the swipe world + its addictive hook (lean: reflex/timing duel).
-- Optional WebGL post-FX as the next big "wow" graphics lever (owner liked the dithered look).
+- **Online polish:** does real P2P connect reliably across NATs (may need a TURN
+  fallback)? Tune `SETTLE_MS_ONLINE` against real-world RTT. Mid-match reconnect?
+  Surface the room code more prominently / shareable link?
+- Next trial to add to the swipe world (memory runes / rhythm / anagram) + its hook.
 - ditherFill offscreen cache if low-end phones ever struggle.
 
 _Keep this file current. It is how Roland remembers itself._

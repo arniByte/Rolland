@@ -14,12 +14,14 @@ import { aiProfile, planExchange, type AiPlan } from "./ai";
 import { damp, clamp } from "../core/mathx";
 import type { Audio } from "../core/audio";
 import type { Shake } from "../render/shake";
+import type { GameController } from "./view";
 
-export type Mode = "local2p" | "ai";
+export type Mode = "local2p" | "ai" | "online";
 export type ScreenName =
   | "title"
   | "modes"
   | "setup"
+  | "lobby"
   | "roundIntro"
   | "playing"
   | "clash"
@@ -53,6 +55,14 @@ const RESULT_MS = 3000;
 const CLASH_IMPACT_MS = 950;
 const CLASH_END_MS = 1850;
 
+// Online fairness: the host buffers correct answers for a short window so a
+// genuinely-faster guest whose packet lands a touch late still wins the
+// exchange (winner = smallest reaction time, never packet-arrival order).
+// 0 for local/AI → resolution is byte-identical to the offline game.
+export const SETTLE_MS_ONLINE = 120;
+const MIN_HUMAN_MS = 80; // clamp floor on any reported reaction (anti-superhuman)
+const MAX_REACTION_MS = 30000; // clamp ceiling (anti-grief / AFK)
+
 export type EngineEvent =
   | { type: "hoof"; player: PlayerId }
   | { type: "wrong"; player: PlayerId }
@@ -72,13 +82,17 @@ export const DEFAULT_SETTINGS: Settings = {
   challenge: "arithmetic",
 };
 
-export class Engine {
+export class Engine implements GameController {
   screen: ScreenName = "title";
   settings: Settings = { ...DEFAULT_SETTINGS };
   match: MatchState = createMatch();
   problem: Problem | null = null;
   attempts: [Attempt, Attempt] = [{ state: "idle" }, { state: "idle" }];
   knights: [KnightView, KnightView] = [freshView(), freshView()];
+  /** the Engine is always the HOST/local brain → its local player is 0 */
+  readonly localPlayer: PlayerId = 0;
+  /** bumps on every new exchange; lets a guest detect a fresh prompt + reject stale inputs */
+  problemId = 0;
 
   // timers / anim
   introT = 0;
@@ -96,6 +110,11 @@ export class Engine {
   private problemShownAt = 0;
   private firstCorrect: { player: PlayerId; reactionMs: number } | null = null;
   private exchangeResolved = false;
+  // settle buffer (online fairness): correct answers collect here until either
+  // both players have answered or the settle window elapses, then the smallest
+  // reaction time wins. For local/AI the window is 0 → resolves instantly.
+  private settleT = 0;
+  private pending: { player: PlayerId; reactionMs: number }[] = [];
   private cooldown = 0;
   private aiPlan: AiPlan | null = null;
   private aiActed = false;
@@ -134,7 +153,8 @@ export class Engine {
         break;
       case "setup":
         this.deps.audio.select();
-        this.startMatch();
+        if (this.settings.mode === "online") this.setScreen("lobby");
+        else this.startMatch();
         break;
       case "roundIntro":
         this.enterPlaying();
@@ -144,6 +164,10 @@ export class Engine {
         break;
       case "matchOver":
         this.deps.audio.select();
+        // online: only the explicit LEAVE / REMATCH buttons exit, so a stray
+        // Enter (local or remotely-relayed) can't drop the host to the title
+        // and orphan the guest while the room is still live.
+        if (this.settings.mode === "online") return;
         this.setScreen("title");
         break;
     }
@@ -153,7 +177,13 @@ export class Engine {
     if (this.screen === "title") return;
     if (this.screen === "setup") return this.setScreen("modes");
     if (this.screen === "modes") return this.setScreen("title");
+    if (this.screen === "lobby") return this.setScreen("setup");
     // abandon any match in progress and return to the title cleanly
+    this.home();
+  }
+
+  /** Hard reset to the title — used when leaving an online room. */
+  home(): void {
     this.match = createMatch();
     this.knights = [freshView(), freshView()];
     this.problem = null;
@@ -167,11 +197,15 @@ export class Engine {
     this.setScreen("setup");
   }
 
+  /** sugar used by the answer pads — answer as whoever this device controls */
+  answerLocal(choice: number): void {
+    this.answer(this.localPlayer, choice);
+  }
+
+  /** A local tap: judge it against this device's own clock, then submit. */
   answer(player: PlayerId, choice: number): void {
     if (this.screen !== "playing" || this.exchangeResolved || !this.problem) return;
-    const a = this.attempts[player];
-    if (a.state !== "idle") return;
-    a.choice = choice;
+    if (this.attempts[player].state !== "idle") return;
 
     const age = this.now - this.problemShownAt;
     let correct: boolean;
@@ -179,35 +213,80 @@ export class Engine {
     if (this.problem.kind === "quickdraw") {
       const reveal = this.problem.revealMs ?? 0;
       correct = age >= reveal; // striking before the rune flares = a false start
-      reactionMs = Math.max(0, age - reveal);
+      reactionMs = age - reveal;
     } else {
       correct = choice === this.problem.correct;
       reactionMs = age;
     }
+    this.submit(player, choice, correct, reactionMs);
+  }
+
+  /**
+   * A remote (guest) answer arriving over the wire. It carries the guest's OWN
+   * measured reaction time (time since the guest's device showed the prompt), so
+   * latency never decides the duel. Arithmetic correctness is still host-validated;
+   * quickdraw trusts the guest's locally-judged false-start (the host cannot see
+   * the guest's reveal timing). Stale inputs (old exchange) are dropped.
+   */
+  answerRemote(player: PlayerId, problemId: number, choice: number, reactionMs: number, falseStart: boolean): void {
+    if (this.screen !== "playing" || this.exchangeResolved || !this.problem) return;
+    if (problemId !== this.problemId) return; // belongs to a past exchange
+    if (this.attempts[player].state !== "idle") return;
+    const correct = this.problem.kind === "quickdraw" ? !falseStart : choice === this.problem.correct;
+    this.submit(player, choice, correct, reactionMs);
+  }
+
+  /** The shared resolution core for both local taps and remote inputs. */
+  private submit(player: PlayerId, choice: number, correct: boolean, reactionMs: number): void {
+    const a = this.attempts[player];
+    a.choice = choice;
+    // a forged/NaN reaction from the wire must never poison the comparison
+    if (!Number.isFinite(reactionMs)) reactionMs = MAX_REACTION_MS;
+    reactionMs = clamp(reactionMs, MIN_HUMAN_MS, MAX_REACTION_MS);
+    const settle = this.settings.mode === "online" ? SETTLE_MS_ONLINE : 0;
 
     if (correct) {
       a.state = "correct";
-      if (this.firstCorrect === null) {
-        this.firstCorrect = { player, reactionMs };
-        this.deps.audio.correct(player);
-        this.knights[player].lance = 1;
-        this.resolveExchange(player);
+      this.pending.push({ player, reactionMs });
+      this.deps.audio.correct(player);
+      this.knights[player].lance = 1;
+      if (settle === 0) {
+        this.resolveFromPending(); // local/AI: first correct wins instantly (unchanged)
+      } else if (this.settleT <= 0) {
+        this.settleT = settle; // online: open the grace window on the first correct
       }
+      // once both have committed there is nothing left to wait for
+      if (this.bothAnswered()) this.resolveFromPending();
     } else {
       a.state = "wrong";
       this.deps.audio.wrong();
       this.deps.shake.add(0.14);
       this.knights[player].flash = 1;
       this.events.push({ type: "wrong", player });
-      if (
-        this.firstCorrect === null &&
-        this.attempts[0].state !== "idle" &&
-        this.attempts[1].state !== "idle"
-      ) {
-        this.resolveExchange(null);
+      if (this.bothAnswered()) {
+        if (this.pending.length > 0) this.resolveFromPending();
+        else this.resolveExchange(null); // both failed → no stride for anyone
       }
     }
     this.deps.onUiChange();
+  }
+
+  private bothAnswered(): boolean {
+    return this.attempts[0].state !== "idle" && this.attempts[1].state !== "idle";
+  }
+
+  /** Resolve to the buffered correct answer with the smallest reaction time. */
+  private resolveFromPending(): void {
+    if (this.exchangeResolved || this.pending.length === 0) return;
+    let best = this.pending[0] as { player: PlayerId; reactionMs: number };
+    for (const p of this.pending) {
+      // ties break to the lower player index, deterministically (arrival-order independent)
+      if (p.reactionMs < best.reactionMs || (p.reactionMs === best.reactionMs && p.player < best.player)) {
+        best = p;
+      }
+    }
+    this.firstCorrect = { player: best.player, reactionMs: best.reactionMs };
+    this.resolveExchange(best.player);
   }
 
   // ---- update -----------------------------------------------------------
@@ -236,6 +315,12 @@ export class Engine {
 
   private updatePlaying(dt: number): void {
     this.exchangeAge = this.now - this.problemShownAt;
+
+    // close the online settle window once it elapses (host-authoritative)
+    if (this.settleT > 0) {
+      this.settleT -= dt;
+      if (this.settleT <= 0) this.resolveFromPending();
+    }
 
     if (this.cooldown > 0) {
       this.cooldown -= dt;
@@ -332,10 +417,13 @@ export class Engine {
         ? genQuickdraw(this.rng)
         : genProblem(this.rng, this.settings.difficulty);
     this.problemShownAt = this.now;
+    this.problemId++;
     this.exchangeAge = 0;
     this.attempts = [{ state: "idle" }, { state: "idle" }];
     this.firstCorrect = null;
     this.exchangeResolved = false;
+    this.settleT = 0;
+    this.pending.length = 0;
     this.cooldown = 0;
     this.aiActed = false;
     this.aiPlan =
@@ -349,6 +437,8 @@ export class Engine {
   private resolveExchange(winner: PlayerId | null): void {
     if (this.exchangeResolved) return;
     this.exchangeResolved = true;
+    this.settleT = 0;
+    this.pending.length = 0;
     const ex: ExchangeResult = {
       winner,
       reactionMs: this.firstCorrect ? this.firstCorrect.reactionMs : 0,

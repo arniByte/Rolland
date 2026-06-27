@@ -1,4 +1,6 @@
-import { Engine, type Mode } from "../game/engine";
+import type { Mode } from "../game/engine";
+import type { GameController } from "../game/view";
+import type { Online } from "../net/session";
 import type { Audio } from "../core/audio";
 import type { Difficulty } from "../game/problems";
 import { DIFFICULTY_LABEL, CHALLENGES } from "../game/problems";
@@ -6,6 +8,9 @@ import { KEY_HINTS } from "../core/input";
 import type { PlayerId } from "../game/match";
 
 type Attrs = Record<string, string | EventListener>;
+
+/** Online play is unavailable in the offline single-file build (no network). */
+const ONLINE_ENABLED = import.meta.env.MODE !== "single";
 
 function el(tag: string, attrs: Attrs = {}, ...kids: (Node | string)[]): HTMLElement {
   const n = document.createElement(tag);
@@ -27,17 +32,33 @@ export class UI {
 
   constructor(
     private root: HTMLElement,
-    private engine: Engine,
+    private online: Online,
     private audio: Audio,
   ) {
     this.content = el("div", { id: "ui-content", class: "uic" });
     this.root.append(this.content);
   }
 
+  /** the currently-active controller (host Engine, or the guest's RemoteView) */
+  private get ctrl(): GameController {
+    return this.online.controller;
+  }
+
   render(): void {
-    const e = this.engine;
+    const e = this.ctrl;
     this.root.dataset.mode = e.settings.mode;
     this.root.dataset.screen = e.screen;
+    // online = each player on their own device → one pad, upright (no table flip)
+    if (e.settings.mode === "online") this.root.dataset.solo = "1";
+    else this.root.removeAttribute("data-solo");
+
+    // a fled foe pre-empts every in-match screen
+    if (this.online.active && this.online.state === "peerLeft") {
+      this.sig = "";
+      this.content.replaceChildren();
+      this.renderPeerLeft();
+      return;
+    }
 
     // During play, only the structure-defining bits force a rebuild; attempt
     // state changes just re-sync classes (keeps taps snappy, preserves focus).
@@ -64,6 +85,9 @@ export class UI {
       case "setup":
         this.renderSetup();
         break;
+      case "lobby":
+        this.renderLobby();
+        break;
       case "roundIntro":
         this.content.append(this.veil());
         break;
@@ -87,7 +111,7 @@ export class UI {
     v.addEventListener("pointerdown", (ev) => {
       ev.preventDefault();
       this.audio.resume();
-      this.engine.confirm();
+      this.ctrl.confirm();
     });
     return v;
   }
@@ -108,6 +132,34 @@ export class UI {
     return b;
   }
 
+  /** A labelled segmented control (shared by setup + the online lobby). */
+  private segRow(
+    label: string,
+    options: { v: string; t: string }[],
+    get: () => string,
+    set: (v: string) => void,
+  ): HTMLElement {
+    const segEl = el("div", { class: "seg" });
+    const refresh = (): void => {
+      segEl.querySelectorAll("button").forEach((b) => {
+        b.classList.toggle("on", (b as HTMLElement).dataset.v === get());
+      });
+    };
+    for (const o of options) {
+      const b = el("button", { "data-v": o.v }, o.t);
+      b.addEventListener("pointerdown", (ev) => {
+        ev.preventDefault();
+        this.audio.resume();
+        this.audio.select();
+        set(o.v);
+        refresh();
+      });
+      segEl.append(b);
+    }
+    refresh();
+    return el("div", { class: "optline" }, el("span", { class: "label" }, label), segEl);
+  }
+
   // ---- title ----
   private renderTitle(): void {
     this.content.append(this.veil());
@@ -124,7 +176,7 @@ export class UI {
           pointerdown: (ev: Event) => {
             ev.preventDefault();
             this.audio.resume();
-            this.engine.confirm();
+            this.ctrl.confirm();
           },
         },
         "⚔  ENTER THE LISTS  ⚔",
@@ -137,7 +189,7 @@ export class UI {
 
   // ---- modes (swipe carousel of trials) ----
   private renderModes(): void {
-    const e = this.engine;
+    const e = this.ctrl;
     const found = CHALLENGES.findIndex((c) => c.kind === e.settings.challenge);
     this.modeIndex = found < 0 ? 0 : found;
 
@@ -167,7 +219,7 @@ export class UI {
       );
       card.addEventListener("pointerdown", (ev) => {
         ev.preventDefault();
-        if (i === this.modeIndex) this.engine.pickTrial(info.kind);
+        if (i === this.modeIndex) this.ctrl.pickTrial(info.kind);
         else select(i);
       });
       track.append(card);
@@ -201,46 +253,25 @@ export class UI {
         this.button("◀", () => select(this.modeIndex - 1)),
         this.button("ENTER ⚔", () => {
           const cur = CHALLENGES[this.modeIndex];
-          if (cur) this.engine.pickTrial(cur.kind);
+          if (cur) this.ctrl.pickTrial(cur.kind);
         }, true),
         this.button("▶", () => select(this.modeIndex + 1)),
       ),
     );
-    view.append(el("div", { class: "row" }, this.button("◀ BACK", () => this.engine.back())));
+    view.append(el("div", { class: "row" }, this.button("◀ BACK", () => this.ctrl.back())));
     this.content.append(view);
   }
 
   // ---- setup ----
   private renderSetup(): void {
-    const e = this.engine;
+    const e = this.ctrl;
     const s = e.settings;
 
-    const seg = (
-      label: string,
-      options: { v: string; t: string }[],
-      get: () => string,
-      set: (v: string) => void,
-    ): HTMLElement => {
-      const segEl = el("div", { class: "seg" });
-      const refresh = (): void => {
-        segEl.querySelectorAll("button").forEach((b) => {
-          b.classList.toggle("on", (b as HTMLElement).dataset.v === get());
-        });
-      };
-      for (const o of options) {
-        const b = el("button", { "data-v": o.v }, o.t);
-        b.addEventListener("pointerdown", (ev) => {
-          ev.preventDefault();
-          this.audio.resume();
-          this.audio.select();
-          set(o.v);
-          refresh();
-        });
-        segEl.append(b);
-      }
-      refresh();
-      return el("div", { class: "optline" }, el("span", { class: "label" }, label), segEl);
-    };
+    const foes = [
+      { v: "local2p", t: "TWO KNIGHTS" },
+      { v: "ai", t: "VS SQUIRE" },
+    ];
+    if (ONLINE_ENABLED) foes.push({ v: "online", t: "ONLINE" });
 
     const name = (player: PlayerId): HTMLElement => {
       const input = el("input", {
@@ -259,25 +290,22 @@ export class UI {
       "div",
       { class: "scroll" },
       el("h2", {}, "Prepare for the Tilt"),
-      seg(
+      this.segRow(
         "FOES",
-        [
-          { v: "local2p", t: "TWO KNIGHTS" },
-          { v: "ai", t: "VS SQUIRE" },
-        ],
+        foes,
         () => s.mode,
         (v) => {
           s.mode = v as Mode;
           this.root.dataset.mode = v;
         },
       ),
-      seg(
+      this.segRow(
         "LORE",
         (["squire", "knight", "champion"] as Difficulty[]).map((d) => ({ v: d, t: DIFFICULTY_LABEL[d] })),
         () => s.difficulty,
         (v) => (s.difficulty = v as Difficulty),
       ),
-      seg(
+      this.segRow(
         "ROUNDS",
         [
           { v: "3", t: "3" },
@@ -292,25 +320,157 @@ export class UI {
       el(
         "div",
         { class: "row", style: "margin-top:0.8rem" },
-        this.button("◀ BACK", () => this.engine.back()),
-        this.button("TO ARMS! ▶", () => this.engine.confirm(), true),
+        this.button("◀ BACK", () => this.ctrl.back()),
+        this.button(s.mode === "online" ? "ENTER A KEEP ▶" : "TO ARMS! ▶", () => this.ctrl.confirm(), true),
       ),
     );
 
     this.content.append(el("div", { class: "overlay" }, scroll));
   }
 
+  // ---- lobby (online rooms) ----
+  private renderLobby(): void {
+    const o = this.online;
+    const e = this.ctrl;
+    const s = e.settings;
+    const scroll = el("div", { class: "scroll" });
+    scroll.append(el("div", { class: "ornament" }, "✦ enter a keep ✦"));
+    scroll.append(el("h2", {}, "ONLINE TILT"));
+
+    if (!o.active) {
+      const nameField = el("input", {
+        class: "namefield",
+        maxlength: "12",
+        placeholder: "THY NAME",
+        value: o.localName,
+        "aria-label": "your name",
+      }) as HTMLInputElement;
+      nameField.addEventListener("input", () => {
+        o.localName = nameField.value.toUpperCase();
+      });
+      scroll.append(el("div", { class: "optline" }, el("span", { class: "label" }, "NAME"), nameField));
+
+      scroll.append(el("div", { class: "row" }, this.button("⚔ CREATE ROOM", () => void o.createGame(), true)));
+      scroll.append(el("div", { class: "lobby-or" }, "— or —"));
+
+      const codeField = el("input", {
+        class: "namefield code-input",
+        maxlength: "4",
+        placeholder: "CODE",
+        "aria-label": "room code",
+      }) as HTMLInputElement;
+      scroll.append(
+        el(
+          "div",
+          { class: "optline" },
+          codeField,
+          this.button("JOIN ▶", () => void o.joinGame(codeField.value)),
+        ),
+      );
+      scroll.append(el("div", { class: "row" }, this.button("◀ BACK", () => this.ctrl.back())));
+    } else {
+      scroll.append(el("div", { class: "lobby-state" }, this.lobbyStateLine()));
+      if (o.role === "host" && o.roomCode) {
+        scroll.append(el("div", { class: "code" }, o.roomCode));
+        scroll.append(el("div", { class: "hint" }, "speak this code to thy foe"));
+      }
+
+      if (o.role === "host") {
+        scroll.append(
+          this.segRow(
+            "LORE",
+            (["squire", "knight", "champion"] as Difficulty[]).map((d) => ({ v: d, t: DIFFICULTY_LABEL[d] })),
+            () => s.difficulty,
+            (v) => {
+              s.difficulty = v as Difficulty;
+              o.pushSettings();
+            },
+          ),
+        );
+        scroll.append(
+          this.segRow(
+            "ROUNDS",
+            [
+              { v: "3", t: "3" },
+              { v: "5", t: "5" },
+              { v: "7", t: "7" },
+            ],
+            () => String(s.rounds),
+            (v) => {
+              s.rounds = parseInt(v, 10);
+              o.pushSettings();
+            },
+          ),
+        );
+      } else if (o.remoteSettings) {
+        const rs = o.remoteSettings;
+        scroll.append(
+          el(
+            "div",
+            { class: "lobby-decree" },
+            `THE HOST DECREES — ${DIFFICULTY_LABEL[rs.difficulty]} · ${rs.rounds} ROUNDS · ${rs.challenge.toUpperCase()}`,
+          ),
+        );
+      }
+
+      const row = el("div", { class: "row", style: "margin-top:0.7rem" });
+      if (o.state === "connected" && o.role === "host") {
+        row.append(this.button("TO ARMS! ▶", () => o.start(), true));
+      } else if (o.state === "connected" && o.role === "guest") {
+        scroll.append(el("div", { class: "hint" }, "awaiting the host's command…"));
+      }
+      row.append(this.button("LEAVE", () => o.leave()));
+      scroll.append(row);
+    }
+
+    this.content.append(el("div", { class: "overlay" }, scroll));
+  }
+
+  private lobbyStateLine(): string {
+    const o = this.online;
+    switch (o.state) {
+      case "creating":
+        return "forging a keep…";
+      case "waiting":
+        return "awaiting a challenger…";
+      case "connecting":
+        return "hailing the keep…";
+      case "connected":
+        return o.role === "host" ? "a challenger stands ready" : "thou art admitted";
+      case "peerLeft":
+        return "thy foe has fled the lists";
+      case "error":
+        return o.error || "the connection faltered";
+      default:
+        return "";
+    }
+  }
+
+  private renderPeerLeft(): void {
+    const panel = el(
+      "div",
+      { class: "overlay" },
+      el("div", { class: "scroll" }, el("div", { class: "ornament" }, "✶ ✶ ✶"), el("h2", {}, "THY FOE HAS FLED")),
+      el("div", { class: "row" }, this.button("MENU", () => this.online.leave(), true)),
+    );
+    this.content.append(panel);
+  }
+
   // ---- pads ----
+  private padPlayers(): PlayerId[] {
+    const e = this.ctrl;
+    return e.settings.mode === "local2p" ? [0, 1] : [e.localPlayer];
+  }
+
   private renderPads(): void {
-    const e = this.engine;
+    const e = this.ctrl;
     if (!e.problem) return;
     this.tiles = [[], []];
-    this.content.append(this.buildPad(0));
-    if (e.settings.mode === "local2p") this.content.append(this.buildPad(1));
+    for (const p of this.padPlayers()) this.content.append(this.buildPad(p));
   }
 
   private heartsEl(player: PlayerId): HTMLElement {
-    const e = this.engine;
+    const e = this.ctrl;
     const max = 5;
     const filled = Math.max(
       0,
@@ -322,10 +482,11 @@ export class UI {
   }
 
   private buildPad(player: PlayerId): HTMLElement {
-    const e = this.engine;
+    const e = this.ctrl;
     const problem = e.problem!;
     const hints = KEY_HINTS[player];
     const strike = e.settings.challenge === "quickdraw";
+    const local2p = e.settings.mode === "local2p";
 
     const pad = el("div", { class: `pad p${player}${strike ? " strike-pad" : ""}` });
     pad.append(
@@ -353,7 +514,8 @@ export class UI {
         ev.preventDefault();
         ev.stopPropagation();
         this.audio.resume();
-        this.engine.answer(player, choice);
+        if (local2p) this.ctrl.answer(player, choice);
+        else this.ctrl.answerLocal(choice);
       });
       this.tiles[player].push(btn);
       pad.append(btn);
@@ -369,11 +531,10 @@ export class UI {
 
   /** Update tile state classes in place (no rebuild → snappy, focus-safe). */
   private syncPads(): void {
-    const e = this.engine;
+    const e = this.ctrl;
     if (!e.problem) return;
     const revealing = e.isRevealing();
-    const players: PlayerId[] = e.settings.mode === "local2p" ? [0, 1] : [0];
-    for (const p of players) {
+    for (const p of this.padPlayers()) {
       const attempt = e.attempts[p];
       this.tiles[p].forEach((btn, i) => {
         btn.classList.toggle("wrong", attempt.choice === i && attempt.state === "wrong");
@@ -388,19 +549,25 @@ export class UI {
 
   // ---- result / match over ----
   private renderMatchOver(): void {
-    const e = this.engine;
-    const panel = el(
-      "div",
-      { class: "overlay" },
-      el("div", { class: "scroll" }, el("div", { class: "ornament" }, "✦ ❦ ✦"), el("h2", {}, e.banner)),
-      el(
-        "div",
-        { class: "row" },
-        this.button("⚔ REMATCH", () => this.engine.startMatch(), true),
-        this.button("MENU", () => this.engine.back()),
-      ),
-    );
-    this.content.append(panel);
+    const e = this.ctrl;
+    const online = e.settings.mode === "online";
+    const isGuest = online && e.localPlayer === 1;
+
+    const actions = el("div", { class: "row" });
+    if (isGuest) {
+      actions.append(this.button("LEAVE", () => this.online.leave(), true));
+    } else if (online) {
+      actions.append(this.button("⚔ REMATCH", () => this.ctrl.startMatch(), true));
+      actions.append(this.button("LEAVE", () => this.online.leave()));
+    } else {
+      actions.append(this.button("⚔ REMATCH", () => this.ctrl.startMatch(), true));
+      actions.append(this.button("MENU", () => this.ctrl.back()));
+    }
+
+    const scrollKids: (Node | string)[] = [el("div", { class: "ornament" }, "✦ ❦ ✦"), el("h2", {}, e.banner)];
+    if (isGuest) scrollKids.push(el("div", { class: "hint" }, "the host may call a rematch"));
+
+    this.content.append(el("div", { class: "overlay" }, el("div", { class: "scroll" }, ...scrollKids), actions));
   }
 
   // ---- helper ----
