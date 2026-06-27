@@ -4,14 +4,17 @@
     <meta charset="UTF-8" />
     <meta
       name="viewport"
-      content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content, maximum-scale=1, user-scalable=no"
+      content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content"
     />
     <meta name="theme-color" content="#120A8F" />
     <meta name="description" content="Roland — a blue-duotone dithered-ASCII jousting math duel for two." />
     <title>ROLAND · an ASCII joust</title>
 
-    <!-- self-hosted fonts (no network dependency; works offline / single-file) -->
-    <link rel="stylesheet" href="./fonts/fonts.css" />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' fill='%23F1E9D2'/%3E%3Cpath d='M8 2l4 2v4c0 3-2 4-4 5-2-1-4-2-4-5V4z' fill='%232D4BD6'/%3E%3Cpath d='M8 3v9M5 6h6' stroke='%23E0392B' stroke-width='1.2'/%3E%3C/svg%3E"
+    />
+    <!-- fonts are imported from src/fonts.css so they bundle (and inline in single-file) -->
   </head>
   <body>
     <!-- The arena renders here; the HUD/number-pad live in #ui as responsive HTML on top. -->

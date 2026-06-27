@@ -16,8 +16,9 @@ export class Rng {
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   }
 
-  /** integer in [min, max] inclusive */
+  /** integer in [min, max] inclusive (tolerates swapped bounds) */
   int(min: number, max: number): number {
+    if (min > max) [min, max] = [max, min];
     return min + Math.floor(this.next() * (max - min + 1));
   }
 

@@ -1,4 +1,5 @@
 import "./style.css";
+import "./fonts.css";
 import { Screen } from "./render/screen";
 import { Audio } from "./core/audio";
 import { Shake } from "./render/shake";
@@ -18,12 +19,20 @@ async function boot(): Promise<void> {
   const audio = new Audio();
   const shake = new Shake();
   const arena = new Arena(screen, shake);
-  buildKnights(); // procedurally rasterize the knight sprites into dithered ASCII
 
   let ui: UI | undefined;
   const engine = new Engine({ audio, shake, onUiChange: () => ui?.render() });
   ui = new UI(uiRoot, engine, audio);
-  (window as unknown as { __engine: Engine }).__engine = engine; // debug / e2e hook
+  if (import.meta.env.DEV) {
+    (window as unknown as { __engine: Engine }).__engine = engine; // dev/e2e hook only
+  }
+
+  // knight sprites scale with the grid so the lane stays long on phones
+  const rebuildKnights = (): void => {
+    const kc = Math.max(16, Math.min(30, Math.round(screen.cols * 0.24)));
+    const kr = Math.max(10, Math.round(kc * 0.62));
+    buildKnights(kc, kr);
+  };
 
   // Wait for the webfonts so the monospace grid measures correctly.
   try {
@@ -32,24 +41,24 @@ async function boot(): Promise<void> {
     /* fonts API absent — fall back to system monospace */
   }
   screen.resize();
+  rebuildKnights();
   ui.render();
 
-  const onResize = (): void => screen.resize();
+  const onResize = (): void => {
+    screen.resize();
+    rebuildKnights();
+  };
   window.addEventListener("resize", onResize);
   window.addEventListener("orientationchange", () => setTimeout(onResize, 100));
   window.addEventListener("load", () => setTimeout(onResize, 50));
 
-  const wake = (): void => {
-    audio.resume();
-    audio.startMusic();
-  };
-  attachKeyboard({
+  const detachKeyboard = attachKeyboard({
     onAnswer: (i) => {
-      wake();
+      audio.resume();
       engine.answer(i.player, i.choice);
     },
     onConfirm: () => {
-      wake();
+      audio.resume();
       engine.confirm();
     },
     onBack: () => engine.back(),
@@ -63,6 +72,18 @@ async function boot(): Promise<void> {
     render: () => arena.draw(engine),
   });
   loop.start();
+
+  // clean teardown for HMR / re-boot so listeners & timers don't pile up
+  import.meta.hot?.dispose(() => {
+    loop.stop();
+    detachKeyboard();
+    audio.stopMusic();
+    window.removeEventListener("resize", onResize);
+  });
 }
 
-void boot();
+// guard against double-boot (HMR, accidental re-import)
+if (!(window as unknown as { __rolandBooted?: boolean }).__rolandBooted) {
+  (window as unknown as { __rolandBooted?: boolean }).__rolandBooted = true;
+  void boot();
+}

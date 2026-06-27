@@ -66,6 +66,13 @@ function freshKnight(hp: number): KnightStats {
 }
 
 export function createMatch(config: MatchConfig = DEFAULT_CONFIG): MatchState {
+  // guard against invalid configs (keeps clash/crit/round logic well-defined)
+  config = {
+    ...config,
+    rounds: Math.max(1, Math.floor(config.rounds)),
+    stridesToClash: Math.max(1, Math.floor(config.stridesToClash)),
+    maxHp: Math.max(1, config.maxHp),
+  };
   return {
     config,
     round: 0,

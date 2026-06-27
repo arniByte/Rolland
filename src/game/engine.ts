@@ -110,6 +110,11 @@ export class Engine {
       difficulty: this.settings.difficulty,
     });
     this.knights = [freshView(), freshView()];
+    this.introT = 0;
+    this.clashT = 0;
+    this.resultT = 0;
+    this.titleT = 0;
+    this.deps.audio.startMusic();
     this.enterRoundIntro();
   }
 
@@ -137,8 +142,12 @@ export class Engine {
   }
 
   back(): void {
-    if (this.screen === "setup") this.setScreen("title");
-    else if (this.screen !== "title") this.setScreen("title");
+    if (this.screen === "title") return;
+    // abandon any match in progress and return to the title cleanly
+    this.match = createMatch();
+    this.knights = [freshView(), freshView()];
+    this.problem = null;
+    this.setScreen("title");
   }
 
   answer(player: PlayerId, choice: number): void {
@@ -258,12 +267,15 @@ export class Engine {
   // ---- transitions ------------------------------------------------------
   private setScreen(s: ScreenName): void {
     this.screen = s;
+    if (s === "title") this.deps.audio.stopMusic();
     this.deps.onUiChange();
   }
 
   private enterRoundIntro(): void {
     this.introT = INTRO_MS;
-    this.banner = `ROUND ${this.match.round + 1} OF ${this.settings.rounds}`;
+    const roundNum = this.match.round + 1;
+    this.banner =
+      roundNum > this.settings.rounds ? "SUDDEN DEATH" : `ROUND ${roundNum} OF ${this.settings.rounds}`;
     this.problem = null;
     this.setScreen("roundIntro");
   }
@@ -319,6 +331,7 @@ export class Engine {
 
   private enterRoundResult(): void {
     this.resultT = 0;
+    this.problem = null;
     const lr = this.match.lastRound;
     if (lr && lr.winner !== null) {
       this.banner = `${this.settings.names[lr.winner]} STRIKES FOR ${lr.damage}`;
@@ -337,6 +350,7 @@ export class Engine {
   }
 
   private enterMatchOver(): void {
+    this.problem = null;
     const w = this.match.matchWinner;
     this.banner = w !== null ? `${this.settings.names[w]} IS CHAMPION` : "A DRAW";
     if (w !== null) this.deps.audio.fanfare();

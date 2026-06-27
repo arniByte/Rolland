@@ -143,16 +143,23 @@ async function main() {
   console.log(`baked emblem.json (${emblem.w}x${emblem.h})`);
 
   // 2) any user images in raw-art/
-  if (existsSync(RAW)) {
-    const files = (await readdir(RAW)).filter((f) => /\.(png|jpe?g|webp)$/i.test(f));
-    for (const f of files) {
-      const name = basename(f, extname(f));
+  if (!existsSync(RAW)) {
+    await mkdir(RAW, { recursive: true });
+    console.log("raw-art/ created — drop png/jpg/webp reference images in it and re-run to bake them.");
+    return;
+  }
+  const files = (await readdir(RAW)).filter((f) => /\.(png|jpe?g|webp)$/i.test(f));
+  for (const f of files) {
+    const name = basename(f, extname(f));
+    try {
       const art = await imageToAscii(join(RAW, f), { cols: 110, mode: "ramp", edges: true });
       await writeFile(join(OUT, `${name}.json`), JSON.stringify(art));
       console.log(`baked ${name}.json (${art.w}x${art.h}) from ${f}`);
+    } catch (err) {
+      console.error(`failed to bake ${f}: ${err instanceof Error ? err.message : err}`);
     }
-    if (!files.length) console.log("raw-art/ has no images — add png/jpg/webp and re-run to bake them.");
   }
+  if (!files.length) console.log("raw-art/ has no images — add png/jpg/webp and re-run to bake them.");
 }
 
 main().catch((e) => {

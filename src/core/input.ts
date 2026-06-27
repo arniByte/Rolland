@@ -48,6 +48,7 @@ export function attachKeyboard(handlers: InputHandlers): () => void {
     }
     if (e.code === "Escape") {
       handlers.onBack();
+      e.preventDefault();
       return;
     }
     const intent = KEYMAP[e.code];

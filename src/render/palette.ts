@@ -14,12 +14,15 @@ export const C = {
   blue3: "#6E8FBF",
   blue4: "#A9C0DE",
 
-  gold: "#C9A227",
-  goldBright: "#F6D12B",
-  goldDeep: "#9C7A1E",
+  // Player 1 identity — a saturated royal blue that pops off the ink
+  royal: "#2D4BD6",
+  royalBright: "#5A78F0",
+  royalDeep: "#1B2E92",
 
-  vermilion: "#E34234",
-  vermilionDeep: "#B22222",
+  // Red is the ONLY accent now (rubrication-style): HP hearts, P2, crits, danger
+  red: "#E0392B",
+  redBright: "#FF5A45",
+  redDeep: "#9E2B22",
 
   ironGall: "#2B2118",
 } as const;
@@ -36,9 +39,9 @@ export const BLUE_RAMP: readonly string[] = [
   C.blue4,
 ];
 
-// Player accent colors.
-export const ACCENT: readonly [string, string] = [C.gold, C.vermilion];
-export const ACCENT_DEEP: readonly [string, string] = [C.goldDeep, C.vermilionDeep];
+// Player accent colors — P1 royal blue, P2 red (the classic duel, on-palette).
+export const ACCENT: readonly [string, string] = [C.royal, C.red];
+export const ACCENT_DEEP: readonly [string, string] = [C.royalDeep, C.redDeep];
 
 // Glyph ramps (dark -> light) used for shading/meters.
 export const SHADE_BLOCKS = " ░▒▓█"; // 5 levels
