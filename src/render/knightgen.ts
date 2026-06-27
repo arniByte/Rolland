@@ -169,12 +169,14 @@ export function buildKnights(cols: number, rows: number): void {
 
   for (const frame of ["g1", "g2", "rear"] as Frame[]) {
     draw(ctx, frame);
+    // "ramp" (punctuation halftone) gives continuous luminance shading — the
+    // DARK PHOSPHOR fidelity jump — instead of flat ░▒▓█ blocks.
     const art = canvasToAscii(ctx, {
       cols,
       rows,
-      floor: 0.16,
-      dither: 0.32,
-      mode: "block",
+      floor: 0.12,
+      dither: 0.5,
+      mode: "ramp",
     });
     registerArt(`knight_${frame}`, art);
   }

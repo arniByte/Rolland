@@ -67,7 +67,7 @@ export function meter(
   width: number,
   t: number,
   fill: string,
-  back: string = C.vellumShade,
+  back: string = C.hairline,
 ): void {
   const clamped = Math.max(0, Math.min(1, t));
   const exact = clamped * width;

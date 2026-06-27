@@ -1,7 +1,10 @@
-// WebGL "deluxe" post pass: samples the Canvas2D scene as a texture and adds a
-// soft ink-bloom, ordered-dither halftone, chromatic aberration (eased up on
-// impact), scanlines, vignette and grain — all while keeping the day/parchment
-// palette. Falls back gracefully (ok=false) when WebGL is unavailable.
+// WebGL "DARK PHOSPHOR" post pass: samples the Canvas2D scene as a texture and
+// adds a phosphor bloom on the BRIGHT glyphs (CRT glow over the near-black
+// field), ordered-dither halftone, scanlines, vignette and gated grain — no
+// chromatic aberration (reads as a glitch). All effects respond to a LOW/HIGH
+// quality uniform and a reduced-motion grain gate. Falls back gracefully
+// (ok=false) to a 2D blit when WebGL is unavailable.
+import { getQuality, prefersReducedMotion } from "./quality";
 
 const VERT = `
 attribute vec2 aPos;
@@ -18,6 +21,8 @@ uniform sampler2D uScene;
 uniform vec2 uRes;
 uniform float uTime;
 uniform float uShake;
+uniform float uQuality; // 0.0 LOW .. 1.0 HIGH
+uniform float uGrain;   // 0 disables grain (reduced-motion / LOW)
 
 float luma(vec3 c){ return dot(c, vec3(0.299, 0.587, 0.114)); }
 float ign(vec2 p){ return fract(52.9829189 * fract(0.06711056*p.x + 0.00583715*p.y)); }
@@ -32,42 +37,44 @@ float bayer4(vec2 c){
   return (m + 0.5) / 16.0;
 }
 
+// keep only the upper luminance range — the glowing glyphs
+vec3 brightPass(vec3 c){ return c * smoothstep(0.20, 0.72, luma(c)); }
+
 void main(){
   vec2 uv = vUv;
   vec2 cen = uv - 0.5;
   vec2 px = 1.0 / uRes;
 
-  // chromatic aberration — tiny at rest, jumps on impact (uShake)
-  float ab = (0.0012 + uShake * 0.010);
-  vec3 col;
-  col.r = texture2D(uScene, uv + cen * ab).r;
-  col.g = texture2D(uScene, uv).g;
-  col.b = texture2D(uScene, uv - cen * ab).b;
+  vec3 col = texture2D(uScene, uv).rgb;
 
-  // cheap ink-bloom: bleed the colored/dark marks (not the bright parchment)
-  vec3 glow = vec3(0.0); float gw = 0.0;
-  for(int j=-1;j<=1;j++) for(int i=-1;i<=1;i++){
-    vec3 s = texture2D(uScene, uv + vec2(float(i), float(j)) * px * 2.0).rgb;
-    float ink = 1.0 - luma(s);
-    glow += s * ink; gw += ink;
+  // --- phosphor bloom: ring-blur the bright glyphs, add the halo back ---
+  vec3 glow = vec3(0.0); float gsum = 0.0;
+  float rad = mix(2.0, 3.4, uQuality);
+  for(int i=0;i<12;i++){
+    float a = float(i) / 12.0 * 6.2831853;
+    vec2 o = vec2(cos(a), sin(a));
+    glow += brightPass(texture2D(uScene, uv + o * px * rad).rgb); gsum += 1.0;
+    if(uQuality > 0.5){
+      glow += brightPass(texture2D(uScene, uv + o * px * rad * 2.0).rgb) * 0.55; gsum += 0.55;
+    }
   }
-  glow = gw > 0.0 ? glow / gw : col;
-  float bloomAmt = 0.16 + uShake * 0.28;
-  col += (glow - col) * clamp(1.0 - luma(col), 0.0, 1.0) * bloomAmt;
+  glow = gsum > 0.0 ? glow / gsum : vec3(0.0);
+  float bloomAmt = (0.55 + uShake * 0.5) * mix(0.7, 1.0, uQuality);
+  col += glow * bloomAmt;
 
-  // ordered-dither halftone (subtle printed texture)
-  col += (bayer4(gl_FragCoord.xy) - 0.5) * 0.045;
+  // --- ordered-dither halftone (very subtle) ---
+  col += (bayer4(gl_FragCoord.xy) - 0.5) * 0.03;
 
-  // scanlines (gentle, resolution-aware)
-  float sl = 0.96 + 0.04 * sin(gl_FragCoord.y * 2.094);
+  // --- scanlines (gentle, resolution-aware) ---
+  float sl = 0.93 + 0.07 * sin(gl_FragCoord.y * 2.094);
   col *= sl;
 
-  // vignette
-  float vig = smoothstep(1.2, 0.35, length(cen) * 1.25);
-  col *= mix(0.84, 1.0, vig);
+  // --- vignette + faint edge halation ---
+  float vig = smoothstep(1.25, 0.3, length(cen) * 1.25);
+  col *= mix(0.58, 1.0, vig);
 
-  // grain
-  col += (ign(gl_FragCoord.xy + uTime * 60.0) - 0.5) * 0.022;
+  // --- grain (gated by reduced-motion / LOW) ---
+  col += (ign(gl_FragCoord.xy + uTime * 60.0) - 0.5) * 0.03 * uGrain;
 
   gl_FragColor = vec4(col, 1.0);
 }`;
@@ -107,6 +114,8 @@ export class PostFX {
         uRes: gl.getUniformLocation(prog, "uRes"),
         uTime: gl.getUniformLocation(prog, "uTime"),
         uShake: gl.getUniformLocation(prog, "uShake"),
+        uQuality: gl.getUniformLocation(prog, "uQuality"),
+        uGrain: gl.getUniformLocation(prog, "uGrain"),
       };
       gl.uniform1i(this.loc.uScene ?? null, 0);
 
@@ -135,6 +144,9 @@ export class PostFX {
     gl.uniform2f(this.loc.uRes ?? null, this.canvas.width, this.canvas.height);
     gl.uniform1f(this.loc.uTime ?? null, time / 1000);
     gl.uniform1f(this.loc.uShake ?? null, Math.min(1, shake));
+    const high = getQuality() === "HIGH";
+    gl.uniform1f(this.loc.uQuality ?? null, high ? 1 : 0);
+    gl.uniform1f(this.loc.uGrain ?? null, prefersReducedMotion() || !high ? 0 : 1);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
   }
 
