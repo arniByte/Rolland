@@ -1,5 +1,5 @@
 import { Rng, randomSeed } from "./rng";
-import { genProblem, type Problem, type Difficulty } from "./problems";
+import { genProblem, genQuickdraw, type Problem, type Difficulty, type ChallengeKind } from "./problems";
 import {
   createMatch,
   beginRound,
@@ -18,6 +18,7 @@ import type { Shake } from "../render/shake";
 export type Mode = "local2p" | "ai";
 export type ScreenName =
   | "title"
+  | "modes"
   | "setup"
   | "roundIntro"
   | "playing"
@@ -30,6 +31,7 @@ export interface Settings {
   difficulty: Difficulty;
   rounds: number;
   names: [string, string];
+  challenge: ChallengeKind;
 }
 
 export interface KnightView {
@@ -67,6 +69,7 @@ export const DEFAULT_SETTINGS: Settings = {
   difficulty: "knight",
   rounds: 5,
   names: ["ROLAND", "OLIVIER"],
+  challenge: "arithmetic",
 };
 
 export class Engine {
@@ -96,6 +99,7 @@ export class Engine {
   private cooldown = 0;
   private aiPlan: AiPlan | null = null;
   private aiActed = false;
+  private aiReactMs = 300;
   private clashImpactFired = false;
 
   constructor(private deps: EngineDeps) {}
@@ -110,14 +114,23 @@ export class Engine {
       difficulty: this.settings.difficulty,
     });
     this.knights = [freshView(), freshView()];
+    this.introT = 0;
+    this.clashT = 0;
+    this.resultT = 0;
+    this.titleT = 0;
+    this.deps.audio.startMusic();
     this.enterRoundIntro();
   }
 
   confirm(): void {
     switch (this.screen) {
       case "title":
-        this.setScreen("setup");
+        this.setScreen("modes");
         this.deps.audio.select();
+        break;
+      case "modes":
+        this.deps.audio.select();
+        this.setScreen("setup");
         break;
       case "setup":
         this.deps.audio.select();
@@ -137,8 +150,21 @@ export class Engine {
   }
 
   back(): void {
-    if (this.screen === "setup") this.setScreen("title");
-    else if (this.screen !== "title") this.setScreen("title");
+    if (this.screen === "title") return;
+    if (this.screen === "setup") return this.setScreen("modes");
+    if (this.screen === "modes") return this.setScreen("title");
+    // abandon any match in progress and return to the title cleanly
+    this.match = createMatch();
+    this.knights = [freshView(), freshView()];
+    this.problem = null;
+    this.setScreen("title");
+  }
+
+  /** choose a trial from the swipe carousel and proceed to setup */
+  pickTrial(kind: ChallengeKind): void {
+    this.settings.challenge = kind;
+    this.deps.audio.select();
+    this.setScreen("setup");
   }
 
   answer(player: PlayerId, choice: number): void {
@@ -147,10 +173,22 @@ export class Engine {
     if (a.state !== "idle") return;
     a.choice = choice;
 
-    if (choice === this.problem.correct) {
+    const age = this.now - this.problemShownAt;
+    let correct: boolean;
+    let reactionMs: number;
+    if (this.problem.kind === "quickdraw") {
+      const reveal = this.problem.revealMs ?? 0;
+      correct = age >= reveal; // striking before the rune flares = a false start
+      reactionMs = Math.max(0, age - reveal);
+    } else {
+      correct = choice === this.problem.correct;
+      reactionMs = age;
+    }
+
+    if (correct) {
       a.state = "correct";
       if (this.firstCorrect === null) {
-        this.firstCorrect = { player, reactionMs: this.now - this.problemShownAt };
+        this.firstCorrect = { player, reactionMs };
         this.deps.audio.correct(player);
         this.knights[player].lance = 1;
         this.resolveExchange(player);
@@ -209,8 +247,16 @@ export class Engine {
     }
 
     // AI commits to its answer after a sampled delay
-    if (this.settings.mode === "ai" && this.aiPlan && !this.aiActed && this.problem) {
-      if (this.exchangeAge >= this.aiPlan.actMs) {
+    if (this.settings.mode === "ai" && this.aiPlan && !this.aiActed && this.problem && this.firstCorrect === null) {
+      if (this.problem.kind === "quickdraw") {
+        const reveal = this.problem.revealMs ?? 0;
+        // a "mistake" here is an early flinch (false start) before the rune flares
+        const target = this.aiPlan.willErr ? reveal * 0.55 : reveal + this.aiReactMs;
+        if (this.exchangeAge >= target) {
+          this.aiActed = true;
+          this.answer(1, 0);
+        }
+      } else if (this.exchangeAge >= this.aiPlan.actMs) {
         this.aiActed = true;
         const choice = this.aiPlan.willErr ? this.wrongChoice(this.problem) : this.problem.correct;
         this.answer(1, choice);
@@ -258,12 +304,15 @@ export class Engine {
   // ---- transitions ------------------------------------------------------
   private setScreen(s: ScreenName): void {
     this.screen = s;
+    if (s === "title") this.deps.audio.stopMusic();
     this.deps.onUiChange();
   }
 
   private enterRoundIntro(): void {
     this.introT = INTRO_MS;
-    this.banner = `ROUND ${this.match.round + 1} OF ${this.settings.rounds}`;
+    const roundNum = this.match.round + 1;
+    this.banner =
+      roundNum > this.settings.rounds ? "SUDDEN DEATH" : `ROUND ${roundNum} OF ${this.settings.rounds}`;
     this.problem = null;
     this.setScreen("roundIntro");
   }
@@ -278,7 +327,10 @@ export class Engine {
   }
 
   private nextProblem(): void {
-    this.problem = genProblem(this.rng, this.settings.difficulty);
+    this.problem =
+      this.settings.challenge === "quickdraw"
+        ? genQuickdraw(this.rng)
+        : genProblem(this.rng, this.settings.difficulty);
     this.problemShownAt = this.now;
     this.exchangeAge = 0;
     this.attempts = [{ state: "idle" }, { state: "idle" }];
@@ -288,6 +340,9 @@ export class Engine {
     this.aiActed = false;
     this.aiPlan =
       this.settings.mode === "ai" ? planExchange(this.rng, aiProfile(this.settings.difficulty)) : null;
+    // reflex reaction time for the squire AI (faster on harder difficulties)
+    const base = this.settings.difficulty === "champion" ? 150 : this.settings.difficulty === "knight" ? 230 : 340;
+    this.aiReactMs = Math.round(base + this.rng.next() * base);
     this.deps.onUiChange();
   }
 
@@ -319,6 +374,7 @@ export class Engine {
 
   private enterRoundResult(): void {
     this.resultT = 0;
+    this.problem = null;
     const lr = this.match.lastRound;
     if (lr && lr.winner !== null) {
       this.banner = `${this.settings.names[lr.winner]} STRIKES FOR ${lr.damage}`;
@@ -337,6 +393,7 @@ export class Engine {
   }
 
   private enterMatchOver(): void {
+    this.problem = null;
     const w = this.match.matchWinner;
     this.banner = w !== null ? `${this.settings.names[w]} IS CHAMPION` : "A DRAW";
     if (w !== null) this.deps.audio.fanfare();

@@ -20,7 +20,7 @@ export class Particles {
   private pool: Particle[] = [];
   private cursor = 0;
 
-  constructor(max = 220) {
+  constructor(max = 420) {
     for (let i = 0; i < max; i++) {
       this.pool.push({
         x: 0, y: 0, vx: 0, vy: 0, life: 0, maxLife: 1,
@@ -29,9 +29,16 @@ export class Particles {
     }
   }
 
+  // Prefer a dead slot; only reuse a live one if the whole pool is busy.
   private next(): Particle {
+    const n = this.pool.length;
+    for (let k = 0; k < n; k++) {
+      const p = this.pool[this.cursor] as Particle;
+      this.cursor = (this.cursor + 1) % n;
+      if (!p.alive) return p;
+    }
     const p = this.pool[this.cursor] as Particle;
-    this.cursor = (this.cursor + 1) % this.pool.length;
+    this.cursor = (this.cursor + 1) % n;
     return p;
   }
 

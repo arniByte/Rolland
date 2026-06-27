@@ -1,22 +1,22 @@
 import { registerArt } from "./art";
 import { canvasToAscii } from "./raster";
-import { KNIGHT_W, KNIGHT_H } from "./sprites";
+import { setKnightSize } from "./sprites";
 
 // Procedurally draw a right-facing knight-on-horse as a smooth silhouette, then
 // convert it to a clean dithered-block ASCII sprite. Self-contained — no assets.
+// The sprite size adapts to the viewport so the lane can be long on phones.
 
 type Frame = "g1" | "g2" | "rear";
 
 const CELL_PX_W = 8;
 const CELL_PX_H = 13; // taller cells mirror the on-screen monospace cell ratio
-const W = KNIGHT_W * CELL_PX_W;
-const H = KNIGHT_H * CELL_PX_H;
-// shapes are authored in a fixed design space, then scaled to fit W x H so the
-// sprite resolution can change without re-tuning every coordinate.
+// shapes are authored in a fixed design space, then scaled to fit W x H.
 const DW = 256;
 const DH = 234;
-const SX = W / DW;
-const SY = H / DH;
+let W = 208;
+let H = 195;
+let SX = W / DW;
+let SY = H / DH;
 
 function ellipse(ctx: CanvasRenderingContext2D, x: number, y: number, rx: number, ry: number): void {
   ctx.beginPath();
@@ -147,7 +147,20 @@ function draw(ctx: CanvasRenderingContext2D, frame: Frame): void {
   ]);
 }
 
-export function buildKnights(): void {
+let lastSize = "";
+
+/** (Re)build the knight sprites at a given cell size. Cheap; called on resize. */
+export function buildKnights(cols: number, rows: number): void {
+  const key = `${cols}x${rows}`;
+  if (key === lastSize) return;
+  lastSize = key;
+
+  setKnightSize(cols, rows);
+  W = cols * CELL_PX_W;
+  H = rows * CELL_PX_H;
+  SX = W / DW;
+  SY = H / DH;
+
   const canvas = document.createElement("canvas");
   canvas.width = W;
   canvas.height = H;
@@ -157,8 +170,8 @@ export function buildKnights(): void {
   for (const frame of ["g1", "g2", "rear"] as Frame[]) {
     draw(ctx, frame);
     const art = canvasToAscii(ctx, {
-      cols: KNIGHT_W,
-      rows: KNIGHT_H,
+      cols,
+      rows,
       floor: 0.16,
       dither: 0.32,
       mode: "block",

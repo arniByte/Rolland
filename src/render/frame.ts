@@ -86,6 +86,26 @@ export function meter(
   }
 }
 
+/** Hearts HP readout. `t` in 0..1 across `count` hearts; last heart can be partial. */
+export function hearts(
+  s: Screen,
+  col: number,
+  row: number,
+  t: number,
+  count: number,
+  color: string,
+  step = 2,
+): void {
+  const exact = Math.max(0, Math.min(1, t)) * count;
+  for (let i = 0; i < count; i++) {
+    const fill = exact - i; // >=1 full · 0..1 partial · <=0 empty
+    const c = col + i * step;
+    if (fill >= 0.75) s.glyph(c, row, "♥", color);
+    else if (fill >= 0.25) s.glyph(c, row, "♥", color, 0.5);
+    else s.glyph(c, row, "♥", color, 0.14);
+  }
+}
+
 /** Vertical dithered gradient fill (parchment sky etc.) using shade blocks. */
 export function ditherFill(
   s: Screen,

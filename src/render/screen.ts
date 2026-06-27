@@ -33,25 +33,19 @@ export class Screen {
     this.canvas.width = Math.round(this.cssW * this.dpr);
     this.canvas.height = Math.round(this.cssH * this.dpr);
 
-    // ~40 cells across the *shorter* axis keeps glyphs a consistent size on any device.
-    const base = Math.min(this.cssW, this.cssH) / 40;
-    this.cellH = Math.max(8, Math.round(base * 1.05));
-    this.cellW = Math.max(5, Math.round(this.cellH * 0.6));
-    this.cols = Math.floor(this.cssW / this.cellW);
-    this.rows = Math.floor(this.cssH / this.cellH);
+    // Aim for a WIDE field (so the lists feel like a long tilt on any device,
+    // especially phones). Cell width is driven by viewport width; height keeps
+    // the monospace ~0.6 advance ratio.
+    this.cellW = Math.max(5, Math.min(15, Math.round(this.cssW / 64)));
+    this.cellH = Math.max(8, Math.round(this.cellW / 0.6));
+    this.cols = Math.max(40, Math.floor(this.cssW / this.cellW));
+    this.rows = Math.max(20, Math.floor(this.cssH / this.cellH));
 
     const ctx = this.ctx;
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     ctx.textAlign = "left";
     ctx.textBaseline = "top";
     ctx.font = `${this.cellH}px ${FONT_STACK}`;
-  }
-
-  get cx0(): number {
-    return Math.floor((this.cols - this.usableCols) / 2);
-  }
-  get usableCols(): number {
-    return this.cols;
   }
 
   clear(color: string): void {
@@ -73,6 +67,8 @@ export class Screen {
   /** Draw one glyph at a (possibly fractional) cell position. */
   glyph(col: number, row: number, ch: string, color: string, alpha = 1): void {
     if (ch === " " || ch === "") return;
+    // skip anything off the grid (saves wasted fillText, prevents stray draws)
+    if (col < -1 || col > this.cols || row < -1 || row > this.rows) return;
     const ctx = this.ctx;
     if (alpha !== 1) ctx.globalAlpha = alpha;
     ctx.fillStyle = color;
@@ -82,13 +78,15 @@ export class Screen {
 
   /** Draw a string left-to-right, one glyph per cell (keeps grid alignment). */
   text(col: number, row: number, str: string, color: string, alpha = 1): void {
+    if (row < -1 || row > this.rows) return;
     const ctx = this.ctx;
     if (alpha !== 1) ctx.globalAlpha = alpha;
     ctx.fillStyle = color;
     const y = Math.round(row * this.cellH);
     for (let i = 0; i < str.length; i++) {
       const ch = str[i] as string;
-      if (ch !== " ") ctx.fillText(ch, Math.round((col + i) * this.cellW), y);
+      const c = col + i;
+      if (ch !== " " && c >= -1 && c <= this.cols) ctx.fillText(ch, Math.round(c * this.cellW), y);
     }
     if (alpha !== 1) ctx.globalAlpha = 1;
   }
