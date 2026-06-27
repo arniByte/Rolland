@@ -38,13 +38,17 @@ export class Screen {
     this.canvas.width = Math.round(this.cssW * this.dpr);
     this.canvas.height = Math.round(this.cssH * this.dpr);
 
-    // Aim for a WIDE field (so the lists feel like a long tilt on any device,
-    // especially phones). Cell width is driven by viewport width; height keeps
-    // the monospace ~0.6 advance ratio.
-    this.cellW = Math.max(5, Math.min(15, Math.round(this.cssW / 64)));
-    this.cellH = Math.max(8, Math.round(this.cellW / 0.6));
-    this.cols = Math.max(40, Math.floor(this.cssW / this.cellW));
-    this.rows = Math.max(20, Math.floor(this.cssH / this.cellH));
+    // Dense, fine-grain field for the DARK PHOSPHOR fidelity: ~150-190 columns
+    // on desktop, ~90-108 on phones (relatively denser since they're physically
+    // small + high-DPR). Cells are small and crisp; height keeps the monospace
+    // ~0.6 advance ratio. (Static art is baked once, so the extra glyphs are cheap.)
+    this.cols =
+      this.cssW < 720
+        ? Math.max(88, Math.min(108, Math.round(this.cssW / 4.2)))
+        : Math.max(132, Math.min(190, Math.round(this.cssW / 7.6)));
+    this.cellW = this.cssW / this.cols;
+    this.cellH = this.cellW / 0.6;
+    this.rows = Math.max(24, Math.floor(this.cssH / this.cellH));
 
     const ctx = this.ctx;
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);

@@ -6,34 +6,47 @@
 > between sessions on purpose — treat it as the source of truth.
 
 ## What Roland is
-A **blue‑on‑cream, dithered‑ASCII jousting duel** with a medieval *illuminated
-manuscript* soul, rendered like a phosphor terminal. Two knights charge by
-**answering challenges faster than each other**; the quicker mind unhorses the
+A **dark‑phosphor, dithered‑ASCII jousting duel** with a medieval soul, rendered
+like a CRT terminal glowing in a dark room ("cyber‑medieval"). Two knights charge
+by **answering challenges faster than each other**; the quicker mind unhorses the
 foe. Plays great on **phone and desktop**. Live at **https://rolland-psi.vercel.app/**.
 
-The feeling we are chasing: *a living illuminated manuscript you can duel inside.*
-Calm, crafted, tactile, a little CRT. Never busy or "gamer-RGB". Everything on
-screen should read as **hand-made ASCII**.
+The feeling we are chasing: *a hacker terminal that happens to be a living
+illuminated manuscript.* Calm, crafted, tactile, glowing. Near‑black field,
+finely‑shaded glyphs, two acid/cyan combatants. Never busy or "gamer‑RGB".
+Everything on screen should read as **hand‑made ASCII**.
+
+> **History:** v1 was blue‑on‑cream parchment. **v2 "DARK PHOSPHOR"** (the
+> ROLAND_v2 brief) replaced that palette entirely — near‑black + acid‑lime +
+> cyan. If you ever see parchment/blue, it's stale; the tokens below are law.
 
 ## Visual language (the vibe — guard this)
-- **Palette is strictly THREE families** (owner's call — do not add others):
-  - **Blue** — the ink / duotone ramp (deep ultramarine → pale). Primary. Also **Player 1's identity**.
-  - **Cream / parchment** — the "white" ground (`#F1E9D2`, shades to `#D6CCA9`).
-  - **Red** — the *single* accent (rubrication-style). Used for **HP hearts**, **Player 2's identity**, crits, danger, key headings. (~`#D33A2C` / deep `#9E2B22`.)
-  - ❌ **Gold and any other hue are removed.** (Earlier builds used gold/vermilion accents — phase them out.) Red is now the precious accent, like red-lead rubric ink on a manuscript: historically correct and on-vibe.
-- **Everything should look ASCII.** UI (answer boxes, banners, menu welcome text,
-  HP, dialogs) should be rendered/styled as ASCII art — box-drawing frames,
-  block-shaded fills, glyph ornaments — not plain web widgets. Aim for *super
-  stylish* ASCII.
-- **Dithering** is the signature: ordered (Bayer 4×4) dither, glyph ramps
-  (`" .:-=+*#%@"`) for big art, block ramp (`" ░▒▓█"`) for clean shaded sprites.
-- **Type:** display = blackletter (UnifrakturMaguntia, self-hosted); grid/UI =
-  JetBrains Mono (self-hosted). Fonts must stay local (offline / single-file).
-- **Post:** subtle CRT scanlines + vignette. Optional future WebGL pass for true
-  per-pixel dither + bloom + chromatic-aberration-on-impact (progressive
-  enhancement, canvas fallback). This is the real "graphics upgrade" lever.
-- **Knights** are drawn procedurally (vector silhouette → dithered-block ASCII in
-  `knightgen.ts`) and mirrored for P2. No external image assets are required.
+- **Palette = DARK PHOSPHOR tokens, single source** (`render/palette.ts` for the
+  canvas, mirrored in `style.css :root`). Do not add other hues.
+  - **Void** — `#0A0C10` page/arena, `#0E1016` panels, `#1B2026` hairlines. The near‑black ground.
+  - **Ink** — `#EAEAE7` primary text, `#5B6670` dim labels. White‑on‑void UI.
+  - **Acid lime** — `#C3F53C` (dim `#33420E`, bright `#EAFFB0`): **Roland / Player 1** + the UI signal/focus colour.
+  - **Cyan phosphor** — `#3DD6C4` (dim `#0E3B3A`, bright `#B9FFF7`): **Olivier / Player 2** / the rival.
+  - **Hit red** — `#FF3B30`: damage / STRIKE flash only. Sparing, brief.
+  - World/atmosphere uses a low‑contrast neutral ramp (`worldShade`) so the two fighters pop.
+- **Everything should look ASCII.** UI panels are **dark glass** (`--void-2`, thin
+  player‑colour border, soft glow on active/focus) — styled like terminal widgets,
+  not plain web boxes. Aim for *super stylish* ASCII.
+- **Fidelity is the signature:** continuous **luminance‑mapped** shading, NOT flat
+  blocks. Sprites bake a greyscale source → glyph via the long ramp (`REP_RAMP` /
+  `mode:"ramp"` in `raster.ts`), each cell coloured by `familyShade(player, t)`.
+  Ordered (Bayer 4×4) dither underneath. Dense grid (~150‑190 cols desktop / ~90‑108 mobile).
+- **Type:** display = blackletter (UnifrakturMaguntia, self‑hosted) recoloured to
+  acid with cyan halation; grid/UI + heavy labels = JetBrains Mono 800 (self‑hosted).
+  Fonts stay local (offline / single‑file) — we did NOT add Archivo Black/Space Mono.
+- **Post (`render/postfx.ts`):** WebGL pass = **phosphor bloom on bright glyphs**,
+  scanlines, vignette, gated grain. **No chromatic aberration** (reads as a glitch).
+  Respects `prefers-reduced-motion` + a **LOW/HIGH** quality switch (`render/quality.ts`,
+  auto‑detected + a title/setup toggle). Graceful 2D‑blit fallback (dark CRT).
+- **Knights** are drawn procedurally (vector silhouette → luminance‑ramp ASCII in
+  `knightgen.ts`), tinted per‑player (acid/cyan), mirrored for P2. No image assets.
+- **Single‑hue mode** (config flag): both fighters → green→white ramp by brightness.
+  Flip with `?hue=single` or `setSingleHue(true)`.
 
 ## Core gameplay
 - Match = **best of N rounds** (3/5/7). Each round is one **tilt** down the lists.
@@ -53,7 +66,9 @@ screen should read as **hand-made ASCII**.
   *opponent-agnostic* so adding opponents/modes is cheap.
 - **Online** — WebRTC P2P duel by 4-letter room code (host creates, foe joins).
   Host-authoritative; fair by *reaction time*. Each device shows only its own
-  upright pad. Works for arithmetic AND quick-draw. (See Roadmap #7.)
+  upright pad. Works for arithmetic AND quick-draw. (See Roadmap #7.) Reached via a
+  prominent **◈ PLAY ONLINE** title button (or Setup → FOES → ONLINE); the host can
+  **copy a `#join=CODE` invite link** so a friend joins in one tap (deep-linked).
 - **Challenge types** (the duel's "question"): currently **arithmetic**. Planned:
   swipe in the menu to a **mode-select world** to pick *other* engaging
   challenge types (reflex/timing, memory runes, etc.) — see Roadmap.
@@ -69,8 +84,9 @@ src/
   net/    transport.ts (interface) · loopback.ts (in-proc, tests) · trysteroTransport.ts (WebRTC P2P, lazy CDN)
           protocol.ts (wire msgs + Snapshot) · snapshot.ts · remoteView.ts (guest GameController)
           session.ts (Online: host/guest orchestrator + lobby state) · room.ts · constants.ts
-  render/ screen.ts (ASCII canvas) · palette.ts · frame.ts (boxes/meters/dither)
-          sprites.ts (knight meta+fallback) · knightgen.ts (vector→ASCII)
+  render/ screen.ts (ASCII canvas, dense grid) · palette.ts (DARK PHOSPHOR tokens + familyShade)
+          frame.ts (boxes/meters/dither) · postfx.ts (WebGL phosphor bloom) · quality.ts (LOW/HIGH)
+          sprites.ts (knight meta+fallback) · knightgen.ts (vector→luminance-ramp ASCII)
           raster.ts (image→dithered ASCII) · arena.ts (the scene, renders a GameView) · art.ts (baked registry)
           particles.ts · shake.ts (trauma)
   ui/     ui.ts (responsive HTML overlay: menus + answer pads + online lobby; renders a GameController)
@@ -84,7 +100,7 @@ docs/     screenshots
 
 ## Key decisions & constraints
 - **Stack:** Vite + TypeScript (strict) + Vitest. **Zero *bundled* runtime deps.**
-  Core JS bundle ~62KB (was ~39KB pre-netcode; +~15KB is the pure-TS online layer).
+  Core JS bundle ~65KB (was ~39KB pre-netcode; +online netcode +DARK PHOSPHOR render).
   Online play uses **Trystero (WebRTC P2P)** but it is *never bundled*: it loads
   via a function-level dynamic `import()` of a pinned ESM CDN URL inside
   `net/trysteroTransport.ts`, which Vite code-splits into a lazy chunk fetched
@@ -176,10 +192,38 @@ hosts are blocked, only use localhost):
    loopback-tested + a guest render was confirmed in-browser over loopback).
    Follow-ups (not blocking): mid-match reconnect, a TURN fallback for strict NATs,
    online spectators, optimistic guest motion smoothing.
-8. **[future]** Owner-generated art via `raw-art/` + `gen:art` (now REP-quality
-   capable); more trials (memory runes, rhythm, anagram); optional night-glow toggle.
+8. **[DONE] DARK PHOSPHOR visual overhaul** (ROLAND_v2 brief) — full reskin from
+   blue/cream → near‑black + acid‑lime (Roland) + cyan (Olivier), white UI. Single
+   token source (`palette.ts` ↔ `style.css`); luminance‑ramp sprite fidelity
+   (`mode:"ramp"`, denser grid); per‑family `familyShade`; smoother knight motion
+   (sub‑cell sliding); richer neutral environment; retuned WebGL post (phosphor
+   bloom, scanlines, vignette, gated grain, **no chromatic aberration**) with
+   `prefers-reduced-motion` + **LOW/HIGH** quality switch (`quality.ts` + UI toggle);
+   dark‑glass UI, acid blackletter title; prominent online entry + `#join=` invite
+   link. `singleHue` flag (`?hue=single`). Game logic untouched (43 tests green).
+   Mobile perf wants a real‑device pass (density/bloom are the levers; LOW auto‑defaults).
+9. **[future]** Owner-generated art via `raw-art/` + `gen:art` (now REP-quality
+   capable); more trials (memory runes, rhythm, anagram); online polish (TURN
+   fallback, reconnect, spectators); real‑device mobile perf tuning.
 
 ## Changelog
+- **Iteration 6 (DARK PHOSPHOR visual overhaul):** palette replaced blue/cream →
+  void/acid/cyan/hit as a single token source (`render/palette.ts` with
+  `familyShade`/`worldShade`/`lerpHex`, mirrored in `style.css :root`). Knights/
+  emblem switched from flat `block` shading to luminance `ramp` halftone
+  (`knightgen.ts`/`raster.ts`); grid densified (`screen.ts` ~150‑190 desktop /
+  ~90‑108 mobile) + knight size scaled to match; arena recoloured (void ground,
+  neutral receding world, acid/cyan fighters, sub‑cell‑smooth motion, hit/family
+  particles). `postfx.ts` retuned for dark phosphor — bright‑glyph bloom, scanlines,
+  vignette, gated grain, **chromatic aberration removed** — gated by new
+  `render/quality.ts` (LOW/HIGH auto‑detect + persist) and `prefers-reduced-motion`.
+  Full UI restyle (`style.css` dark‑glass panels, acid blackletter title with cyan
+  halation, JBM‑800 heavy labels, acid/cyan hearts, safe‑area padding). `ui.ts`:
+  title **◈ PLAY ONLINE** shortcut + FX toggle, setup GRAPHICS toggle, lobby TRIAL
+  picker + **⧉ COPY INVITE LINK**; `main.ts` deep‑link `#join=CODE` auto‑join +
+  `?hue=single` flag + `setSingleHue` dev hook; `index.html` theme/favicon recolour.
+  Game logic untouched (43 tests still green); verified via headless before/after
+  screenshots (desktop + 390×844). Bundle 62→65KB; offline single‑file still builds.
 - **Iteration 5 (online 2-player, WebRTC P2P):** new `game/view.ts` seam
   (`GameView`/`GameController`) — Arena + UI now render from it, not the concrete
   Engine; `Engine implements GameController` (declaration-only). New `src/net/`:

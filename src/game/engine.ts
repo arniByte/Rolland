@@ -182,6 +182,12 @@ export class Engine implements GameController {
     this.home();
   }
 
+  /** Jump straight to the online lobby (title shortcut + shareable deep links). */
+  goOnline(): void {
+    this.settings.mode = "online";
+    this.setScreen("lobby");
+  }
+
   /** Hard reset to the title — used when leaving an online room. */
   home(): void {
     this.match = createMatch();

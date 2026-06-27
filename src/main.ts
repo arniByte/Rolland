@@ -12,6 +12,7 @@ import { attachKeyboard } from "./core/input";
 import { buildKnights } from "./render/knightgen";
 import { Online } from "./net/session";
 import type { Transport } from "./net/transport";
+import { setSingleHue } from "./render/palette";
 
 async function boot(): Promise<void> {
   const visible = document.getElementById("arena") as HTMLCanvasElement | null;
@@ -43,14 +44,22 @@ async function boot(): Promise<void> {
   const online = new Online({ engine, onUiChange: () => ui?.render(), makeTransport });
 
   ui = new UI(uiRoot, online, audio);
+
+  // single-hue mode (config flag): both fighters become a green→white ramp.
+  // Flip via ?hue=single in the URL, or window.__singleHue(true) in dev.
+  if (new URLSearchParams(location.search).get("hue") === "single") setSingleHue(true);
   if (import.meta.env.DEV) {
-    (window as unknown as { __engine: Engine; __online: Online }).__engine = engine;
-    (window as unknown as { __engine: Engine; __online: Online }).__online = online;
+    const w = window as unknown as { __engine: Engine; __online: Online; __singleHue: (on: boolean) => void };
+    w.__engine = engine;
+    w.__online = online;
+    w.__singleHue = setSingleHue;
   }
 
   const rebuildKnights = (): void => {
-    const kc = Math.max(16, Math.min(30, Math.round(screen.cols * 0.24)));
-    const kr = Math.max(10, Math.round(kc * 0.62));
+    // scale the knight with the (now much denser) grid so it stays a bold ~22%
+    // of the lane rather than capping out tiny on wide desktop fields
+    const kc = Math.max(22, Math.min(46, Math.round(screen.cols * 0.22)));
+    const kr = Math.max(14, Math.round(kc * 0.62));
     buildKnights(kc, kr);
   };
 
@@ -75,6 +84,12 @@ async function boot(): Promise<void> {
   }
   sizeAll();
   ui.render();
+
+  // shareable invite deep-link: #join=CODE → open the lobby and join straight away
+  const joinMatch = /[#&]join=([A-Za-z0-9]+)/.exec(location.hash);
+  if (joinMatch && import.meta.env.MODE !== "single") {
+    void online.openAndJoin(joinMatch[1] as string);
+  }
 
   const onResize = (): void => sizeAll();
   window.addEventListener("resize", onResize);

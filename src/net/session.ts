@@ -85,6 +85,18 @@ export class Online {
   }
 
   // ---- lobby actions ----------------------------------------------------
+  /** Open the online lobby (title shortcut). */
+  openLobby(): void {
+    this.deps.engine.goOnline();
+    this.deps.onUiChange();
+  }
+
+  /** Open the lobby and immediately join a code (shareable invite link). */
+  async openAndJoin(code: string): Promise<void> {
+    this.deps.engine.goOnline();
+    await this.joinGame(code);
+  }
+
   async createGame(): Promise<void> {
     if (this.state !== "idle") return;
     this.role = "host";

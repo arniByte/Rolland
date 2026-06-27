@@ -2,10 +2,11 @@ import type { Mode } from "../game/engine";
 import type { GameController } from "../game/view";
 import type { Online } from "../net/session";
 import type { Audio } from "../core/audio";
-import type { Difficulty } from "../game/problems";
+import type { Difficulty, ChallengeKind } from "../game/problems";
 import { DIFFICULTY_LABEL, CHALLENGES } from "../game/problems";
 import { KEY_HINTS } from "../core/input";
 import type { PlayerId } from "../game/match";
+import { getQuality, cycleQuality } from "../render/quality";
 
 type Attrs = Record<string, string | EventListener>;
 
@@ -181,10 +182,30 @@ export class UI {
         },
         "⚔  ENTER THE LISTS  ⚔",
       ),
-      el("div", { class: "row" }, this.soundToggle()),
+      ONLINE_ENABLED
+        ? el("div", { class: "row" }, this.button("◈  PLAY ONLINE", () => this.online.openLobby()))
+        : el("div", {}),
+      el("div", { class: "row" }, this.soundToggle(), this.fxToggle()),
       el("div", { class: "hint" }, "press ENTER · or tap"),
     );
     this.content.append(panel);
+  }
+
+  /** Cycle the render quality (HIGH / LOW) — drives the post-FX cost. */
+  private fxToggle(): HTMLElement {
+    const b = el("button", { class: "btn ghost", "aria-label": "toggle graphics quality" });
+    const sync = (): void => {
+      b.textContent = getQuality() === "HIGH" ? "✦ FX · HIGH" : "✧ FX · LOW";
+    };
+    sync();
+    b.addEventListener("pointerdown", (ev) => {
+      ev.preventDefault();
+      this.audio.resume();
+      this.audio.select();
+      cycleQuality();
+      sync();
+    });
+    return b;
   }
 
   // ---- modes (swipe carousel of trials) ----
@@ -317,6 +338,7 @@ export class UI {
       ),
       el("div", { class: "optline" }, el("span", { class: "label" }, "NAMES"), name(0), name(1)),
       el("div", { class: "optline" }, el("span", { class: "label" }, "SOUND"), this.soundToggle()),
+      el("div", { class: "optline" }, el("span", { class: "label" }, "GRAPHICS"), this.fxToggle()),
       el(
         "div",
         { class: "row", style: "margin-top:0.8rem" },
@@ -372,10 +394,22 @@ export class UI {
       scroll.append(el("div", { class: "lobby-state" }, this.lobbyStateLine()));
       if (o.role === "host" && o.roomCode) {
         scroll.append(el("div", { class: "code" }, o.roomCode));
-        scroll.append(el("div", { class: "hint" }, "speak this code to thy foe"));
+        scroll.append(el("div", { class: "invite" }, this.inviteButton(o.roomCode)));
+        scroll.append(el("div", { class: "hint" }, "share the link · or speak the code"));
       }
 
       if (o.role === "host") {
+        scroll.append(
+          this.segRow(
+            "TRIAL",
+            CHALLENGES.map((c) => ({ v: c.kind, t: c.name })),
+            () => s.challenge,
+            (v) => {
+              s.challenge = v as ChallengeKind;
+              o.pushSettings();
+            },
+          ),
+        );
         scroll.append(
           this.segRow(
             "LORE",
@@ -568,6 +602,27 @@ export class UI {
     if (isGuest) scrollKids.push(el("div", { class: "hint" }, "the host may call a rematch"));
 
     this.content.append(el("div", { class: "overlay" }, el("div", { class: "scroll" }, ...scrollKids), actions));
+  }
+
+  /** A "copy the shareable invite link" button with brief confirm feedback. */
+  private inviteButton(code: string): HTMLElement {
+    const url = `${location.origin}${location.pathname}#join=${code}`;
+    const b = el("button", { class: "btn" }, "⧉ COPY INVITE LINK");
+    b.addEventListener("pointerdown", (ev) => {
+      ev.preventDefault();
+      this.audio.resume();
+      this.audio.select();
+      try {
+        void navigator.clipboard?.writeText(url);
+      } catch {
+        /* clipboard blocked — the code is still shown above */
+      }
+      b.textContent = "✓ LINK COPIED";
+      window.setTimeout(() => {
+        b.textContent = "⧉ COPY INVITE LINK";
+      }, 1400);
+    });
+    return b;
   }
 
   // ---- helper ----
