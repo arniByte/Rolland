@@ -136,8 +136,23 @@ hosts are blocked, only use localhost):
 5. **[DONE] Visual-bug fixes** — mobile prompt now a big per-player header that
    rotates for P2 (readable across the table); corner music button removed →
    sound toggle lives in the title + setup menus.
-6. **[future]** Online 2-player (rooms by code, WebRTC/WS); owner-generated art via
-   `raw-art/` + `gen:art`; optional WebGL deluxe post-FX (true dither + bloom).
+6. **[DONE] WebGL deluxe post-FX** — `render/postfx.ts`: scene drawn to an
+   OFFSCREEN Canvas2D, visible `#arena` is a WebGL pass adding ink-bloom, ordered
+   Bayer dither halftone, chromatic aberration eased up on impact (uShake =
+   trauma), scanlines, vignette, grain. Day/parchment palette kept. Graceful
+   fallback to a 2D blit (+ arena's own CRT) when WebGL is unavailable
+   (`arena.skipCRT`). Owner chose: keep day look + deluxe (not night-glow).
+7. **[NEXT] Online 2-player** — rooms by code. Owner chose **WebRTC P2P
+   (Trystero)** — no server, works on the current Vercel static host. Plan:
+   host-authoritative; fairness by *reaction time* (compare time-since-each-
+   player-saw-the-prompt, not packet arrival). Build a `Transport` interface with
+   a `LoopbackTransport` (in-process, for tests) + `TrysteroTransport` (prod);
+   refactor Arena/UI to render from a `GameView` the host Engine and a guest
+   `RemoteView` both implement; works for arithmetic AND quickdraw. NOTE: the
+   sandbox egress likely blocks public WebRTC signaling, so test the netplay
+   logic via loopback here; the owner verifies real P2P with a friend.
+8. **[future]** Owner-generated art via `raw-art/` + `gen:art` (now REP-quality
+   capable); more trials (memory runes, rhythm, anagram); optional night-glow toggle.
 
 ## Changelog
 - **Iteration 3 (modes world + reflex duel):** title → `modes` swipe carousel of

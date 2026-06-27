@@ -16,6 +16,8 @@ interface Layout {
 
 export class Arena {
   readonly particles = new Particles();
+  /** when the WebGL post pass is active it owns scanlines/vignette, so skip ours */
+  skipCRT = false;
   private artFlash = 0;
   private ambientAccum = 0;
   private time = 0;
@@ -347,19 +349,22 @@ export class Arena {
   private drawCRT(): void {
     const s = this.s;
     const ctx = s.ctx;
-    ctx.globalAlpha = 0.06;
-    ctx.fillStyle = C.ink;
-    for (let y = 0; y < s.cssH; y += 3) ctx.fillRect(0, y, s.cssW, 1);
-    ctx.globalAlpha = 1;
+    // scanlines + vignette only when the WebGL post pass isn't doing them
+    if (!this.skipCRT) {
+      ctx.globalAlpha = 0.06;
+      ctx.fillStyle = C.ink;
+      for (let y = 0; y < s.cssH; y += 3) ctx.fillRect(0, y, s.cssW, 1);
+      ctx.globalAlpha = 1;
 
-    const g = ctx.createRadialGradient(
-      s.cssW / 2, s.cssH / 2, Math.min(s.cssW, s.cssH) * 0.35,
-      s.cssW / 2, s.cssH / 2, Math.max(s.cssW, s.cssH) * 0.7,
-    );
-    g.addColorStop(0, "rgba(0,0,0,0)");
-    g.addColorStop(1, "rgba(11,26,74,0.34)");
-    ctx.fillStyle = g;
-    ctx.fillRect(0, 0, s.cssW, s.cssH);
+      const g = ctx.createRadialGradient(
+        s.cssW / 2, s.cssH / 2, Math.min(s.cssW, s.cssH) * 0.35,
+        s.cssW / 2, s.cssH / 2, Math.max(s.cssW, s.cssH) * 0.7,
+      );
+      g.addColorStop(0, "rgba(0,0,0,0)");
+      g.addColorStop(1, "rgba(11,26,74,0.34)");
+      ctx.fillStyle = g;
+      ctx.fillRect(0, 0, s.cssW, s.cssH);
+    }
 
     if (this.artFlash > 0.01) {
       ctx.globalAlpha = this.artFlash * 0.5;
