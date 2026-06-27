@@ -125,12 +125,14 @@ hosts are blocked, only use localhost):
 3. **[DONE] Gameplay/feel + environment** — adaptive wide grid + adaptive knight
    size → LONG lane on phone; animated clouds/birds/fluttering banners; ambient
    motes + embers; palette → blue/cream/red (gold removed); **HP as hearts**.
-4. **[NEXT — headline] Swipe-left in menu → a "mode-select world"** to pick a
-   non-math challenge. Need an *addictive* mechanic. Candidates: reflex/timing
-   ("strike when the sweep crosses the rune"), memory/Simon runes, anagram, rhythm.
-   Plan: define a `Challenge` interface (present → accept input → judge → {correct,
-   reactionMs}); the engine's exchange loop already consumes exactly that, so
-   modes plug in. Add a horizontal swipe carousel of "rooms" on the menu.
+4. **[DONE] Swipe mode-select world + new mechanic** — title → a swipeable
+   carousel of "trials" (`renderModes` in ui.ts; arrows/swipe/dots) backed by
+   `CHALLENGES` in problems.ts. Shipped two: **ARITHMETIC** and **QUICK DRAW**
+   (a reflex duel — hold, then STRIKE the instant the rune flares; early = false
+   start). `settings.challenge` routes `nextProblem`/`answer`; quickdraw judges by
+   timing (revealMs) and reuses the whole round/clash/damage flow. Next modes
+   (memory runes, rhythm, anagram) plug in via the same path. Future: a formal
+   `Challenge` interface if a mode needs input beyond "tap one of N" / "strike".
 5. **[DONE] Visual-bug fixes** — mobile prompt now a big per-player header that
    rotates for P2 (readable across the table); corner music button removed →
    sound toggle lives in the title + setup menus.
@@ -138,6 +140,11 @@ hosts are blocked, only use localhost):
    `raw-art/` + `gen:art`; optional WebGL deluxe post-FX (true dither + bloom).
 
 ## Changelog
+- **Iteration 3 (modes world + reflex duel):** title → `modes` swipe carousel of
+  trials (ARITHMETIC, QUICK DRAW); `settings.challenge` plumbed through engine;
+  QUICK DRAW reflex mechanic (timing-judged, AI gets a reaction model + early
+  flinches); per-player STRIKE pad; central HOLD→STRIKE cue on canvas. Engine is
+  now challenge-agnostic at the exchange level.
 - **Iteration 2 (palette/UI/feel + audit):** palette → blue/cream/red, removed gold;
   HP hearts (in HTML pad headers, always visible); adaptive grid (`screen.ts`
   targets a wide field) + adaptive knight size (`main.ts` rebuilds `knightgen` on

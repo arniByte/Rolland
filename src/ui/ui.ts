@@ -1,7 +1,7 @@
 import { Engine, type Mode } from "../game/engine";
 import type { Audio } from "../core/audio";
 import type { Difficulty } from "../game/problems";
-import { DIFFICULTY_LABEL } from "../game/problems";
+import { DIFFICULTY_LABEL, CHALLENGES } from "../game/problems";
 import { KEY_HINTS } from "../core/input";
 import type { PlayerId } from "../game/match";
 
@@ -23,6 +23,7 @@ export class UI {
   private content: HTMLElement;
   private sig = "";
   private tiles: [HTMLElement[], HTMLElement[]] = [[], []];
+  private modeIndex = 0;
 
   constructor(
     private root: HTMLElement,
@@ -43,7 +44,8 @@ export class UI {
     const sig = [
       e.screen,
       e.settings.mode,
-      e.problem ? e.problem.choices.join(",") : "",
+      e.settings.challenge,
+      e.problem ? e.problem.choices.join(",") + (e.problem.revealMs ?? "") : "",
     ].join("|");
     if (e.screen === "playing" && sig === this.sig) {
       this.syncPads();
@@ -55,6 +57,9 @@ export class UI {
     switch (e.screen) {
       case "title":
         this.renderTitle();
+        break;
+      case "modes":
+        this.renderModes();
         break;
       case "setup":
         this.renderSetup();
@@ -128,6 +133,81 @@ export class UI {
       el("div", { class: "hint" }, "press ENTER · or tap"),
     );
     this.content.append(panel);
+  }
+
+  // ---- modes (swipe carousel of trials) ----
+  private renderModes(): void {
+    const e = this.engine;
+    const found = CHALLENGES.findIndex((c) => c.kind === e.settings.challenge);
+    this.modeIndex = found < 0 ? 0 : found;
+
+    const select = (i: number): void => {
+      this.modeIndex = (i + CHALLENGES.length) % CHALLENGES.length;
+      const cur = CHALLENGES[this.modeIndex];
+      if (cur) e.settings.challenge = cur.kind;
+      this.audio.resume();
+      this.audio.select();
+      this.render();
+    };
+
+    const view = el("div", { class: "overlay" });
+    view.append(el("div", { class: "ornament" }, "⟨  choose thy trial  ⟩"));
+
+    const viewport = el("div", { class: "carousel" });
+    const track = el("div", { class: "carousel-track" });
+    track.style.transform = `translateX(${-this.modeIndex * 100}%)`;
+    CHALLENGES.forEach((info, i) => {
+      const card = el(
+        "div",
+        { class: "room" + (i === this.modeIndex ? " on" : "") },
+        el("div", { class: "room-icon" }, info.icon),
+        el("h2", {}, info.name),
+        el("div", { class: "room-blurb" }, info.blurb),
+        el("div", { class: "room-tag" }, i === this.modeIndex ? "▼ tap to enter ▼" : ""),
+      );
+      card.addEventListener("pointerdown", (ev) => {
+        ev.preventDefault();
+        if (i === this.modeIndex) this.engine.pickTrial(info.kind);
+        else select(i);
+      });
+      track.append(card);
+    });
+    viewport.append(track);
+
+    // horizontal swipe to change rooms
+    let sx = 0;
+    let active = false;
+    viewport.addEventListener("pointerdown", (ev) => {
+      active = true;
+      sx = ev.clientX;
+    });
+    viewport.addEventListener("pointerup", (ev) => {
+      if (!active) return;
+      active = false;
+      const dx = ev.clientX - sx;
+      if (dx < -40) select(this.modeIndex + 1);
+      else if (dx > 40) select(this.modeIndex - 1);
+    });
+    view.append(viewport);
+
+    const dots = el("div", { class: "dots" });
+    CHALLENGES.forEach((_, i) => dots.append(el("span", { class: "dot" + (i === this.modeIndex ? " on" : "") })));
+    view.append(dots);
+
+    view.append(
+      el(
+        "div",
+        { class: "row" },
+        this.button("◀", () => select(this.modeIndex - 1)),
+        this.button("ENTER ⚔", () => {
+          const cur = CHALLENGES[this.modeIndex];
+          if (cur) this.engine.pickTrial(cur.kind);
+        }, true),
+        this.button("▶", () => select(this.modeIndex + 1)),
+      ),
+    );
+    view.append(el("div", { class: "row" }, this.button("◀ BACK", () => this.engine.back())));
+    this.content.append(view);
   }
 
   // ---- setup ----
@@ -245,8 +325,9 @@ export class UI {
     const e = this.engine;
     const problem = e.problem!;
     const hints = KEY_HINTS[player];
+    const strike = e.settings.challenge === "quickdraw";
 
-    const pad = el("div", { class: `pad p${player}` });
+    const pad = el("div", { class: `pad p${player}${strike ? " strike-pad" : ""}` });
     pad.append(
       el(
         "div",
@@ -257,27 +338,32 @@ export class UI {
           el("span", { class: "eq-name" }, e.settings.names[player]),
           this.heartsEl(player),
         ),
-        el("div", { class: "eq-prob" }, `${problem.text} = ?`),
+        el("div", { class: "eq-prob" }, strike ? "QUICK DRAW" : `${problem.text} = ?`),
       ),
     );
 
-    problem.choices.forEach((value, i) => {
+    const addTile = (label: string, choice: number, extra = ""): void => {
       const btn = el(
         "button",
-        { class: "answer", "aria-label": `answer ${value}` },
-        el("span", { class: "key" }, hints[i] ?? ""),
-        document.createTextNode(String(value)),
+        { class: `answer${extra}`, "aria-label": label },
+        el("span", { class: "key" }, hints[choice] ?? ""),
+        document.createTextNode(label),
       );
       btn.addEventListener("pointerdown", (ev) => {
         ev.preventDefault();
         ev.stopPropagation();
         this.audio.resume();
-        this.engine.answer(player, i);
+        this.engine.answer(player, choice);
       });
       this.tiles[player].push(btn);
       pad.append(btn);
-    });
+    };
 
+    if (strike) {
+      addTile("⚔ STRIKE", 0, " strike");
+    } else {
+      problem.choices.forEach((value, i) => addTile(String(value), i));
+    }
     return pad;
   }
 

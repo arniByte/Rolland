@@ -250,9 +250,27 @@ export class Arena {
     }
   }
 
-  // ---- centre banners (clash / result) ---------------------------------
+  // ---- centre banners (clash / result / quick-draw cue) ----------------
   private drawCenter(e: Engine, layout: Layout): void {
     const s = this.s;
+
+    // Quick Draw: HOLD … then a sudden STRIKE cue both players can read at a glance
+    if (e.screen === "playing" && e.problem && e.problem.kind === "quickdraw") {
+      const reveal = e.problem.revealMs ?? 0;
+      const open = e.exchangeAge >= reveal;
+      const row = Math.max(2, layout.knightTop - 3);
+      if (open) {
+        const flick = Math.floor(this.time * 0.03) % 2 === 0;
+        const txt = "⚔  STRIKE!  ⚔";
+        s.text(Math.floor((s.cols - txt.length) / 2), row, txt, flick ? C.redBright : C.red);
+        for (let i = 2; i < s.cols - 2; i++) s.glyph(i, row + 1, "▀", C.red, flick ? 0.5 : 0.3);
+      } else {
+        const pulse = 0.4 + 0.4 * Math.sin(this.time * 0.012);
+        const txt = "◇  hold  ◇";
+        s.text(Math.floor((s.cols - txt.length) / 2), row, txt, C.blue2, pulse);
+      }
+    }
+
     if (e.screen === "clash" || e.screen === "roundResult") {
       const txt = e.banner;
       const col = Math.floor((s.cols - txt.length) / 2);

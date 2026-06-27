@@ -373,6 +373,79 @@ body {
   width: min(94%, 460px);
 }
 
+/* ---- mode-select carousel ("trials") ---- */
+.carousel {
+  width: min(92vw, 540px);
+  overflow: hidden;
+  border: 3px double var(--blue1);
+  border-radius: 8px;
+  background: rgba(241, 233, 210, 0.92);
+  touch-action: pan-y;
+}
+.carousel-track {
+  display: flex;
+  transition: transform 0.28s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.room {
+  flex: 0 0 100%;
+  padding: 1.3rem 1.2rem;
+  text-align: center;
+  cursor: pointer;
+}
+.room.on {
+  background: linear-gradient(180deg, rgba(45, 75, 214, 0.08), transparent);
+}
+.room-icon {
+  font-size: clamp(2.4rem, 11vw, 4rem);
+  color: var(--red);
+  line-height: 1.1;
+  letter-spacing: 0.1em;
+}
+.room h2 {
+  font-family: var(--black-letter);
+  font-size: 1.9rem;
+  margin: 0.2rem 0 0.4rem;
+  color: var(--blue0);
+}
+.room-blurb {
+  color: var(--ink);
+  font-size: 0.86rem;
+  line-height: 1.45;
+  max-width: 30ch;
+  margin: 0 auto;
+}
+.room-tag {
+  margin-top: 0.7rem;
+  color: var(--red-deep);
+  font-size: 0.72rem;
+  letter-spacing: 0.18em;
+  min-height: 1em;
+  animation: pulse 1.4s ease-in-out infinite;
+}
+.dots {
+  display: flex;
+  gap: 0.4rem;
+}
+.dot {
+  width: 0.6rem;
+  height: 0.6rem;
+  border-radius: 50%;
+  border: 2px solid var(--blue1);
+}
+.dot.on {
+  background: var(--red);
+  border-color: var(--red-deep);
+}
+
+/* quick-draw: a single big STRIKE button per player */
+.strike-pad .answer.strike {
+  grid-column: 1 / -1;
+  min-height: clamp(72px, 18dvh, 150px);
+  font-size: clamp(1.4rem, 6vw, 2.4rem);
+  letter-spacing: 0.1em;
+  color: var(--accent-deep, var(--red-deep));
+}
+
 /* tap-to-advance veil for intros/results */
 .veil {
   position: absolute;

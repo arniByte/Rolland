@@ -14,6 +14,50 @@ export interface Problem {
   readonly choices: readonly number[];
   /** index into `choices` of the correct one */
   readonly correct: number;
+  /** which duel discipline produced this exchange */
+  readonly kind?: ChallengeKind;
+  /** quick-draw: ms after the prompt appears before STRIKE is valid (early = falter) */
+  readonly revealMs?: number;
+}
+
+export type ChallengeKind = "arithmetic" | "quickdraw";
+
+export interface ChallengeInfo {
+  kind: ChallengeKind;
+  name: string;
+  blurb: string;
+  icon: string;
+}
+
+/** The rooms of the swipe-select "trials" world. */
+export const CHALLENGES: readonly ChallengeInfo[] = [
+  {
+    kind: "arithmetic",
+    name: "ARITHMETIC",
+    blurb: "Reckon the sum faster than thy foe to gallop a stride.",
+    icon: "+ − ×",
+  },
+  {
+    kind: "quickdraw",
+    name: "QUICK DRAW",
+    blurb: "Hold… then STRIKE the instant the rune flares. Flinch early and ye falter.",
+    icon: "⚔",
+  },
+];
+
+/** A reflex exchange: no maths, just nerve. `revealMs` is the random hold. */
+export function genQuickdraw(rng: Rng): Problem {
+  return {
+    kind: "quickdraw",
+    text: "",
+    a: 0,
+    b: 0,
+    op: "+",
+    answer: 0,
+    choices: [0],
+    correct: 0,
+    revealMs: Math.round(600 + rng.next() * 1600),
+  };
 }
 
 export const DIFFICULTY_LABEL: Record<Difficulty, string> = {
@@ -69,6 +113,7 @@ export function genProblem(rng: Rng, difficulty: Difficulty): Problem {
   const correct = choices.indexOf(answer);
 
   return {
+    kind: "arithmetic",
     text: `${a} ${op} ${b}`,
     a,
     b,
