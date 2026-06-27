@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content, maximum-scale=1, user-scalable=no"
+    />
+    <meta name="theme-color" content="#120A8F" />
+    <meta name="description" content="Roland — a blue-duotone dithered-ASCII jousting math duel for two." />
+    <title>ROLAND · an ASCII joust</title>
+
+    <!-- self-hosted fonts (no network dependency; works offline / single-file) -->
+    <link rel="stylesheet" href="./fonts/fonts.css" />
+  </head>
+  <body>
+    <!-- The arena renders here; the HUD/number-pad live in #ui as responsive HTML on top. -->
+    <div id="stage">
+      <canvas id="arena"></canvas>
+      <div id="ui"></div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
